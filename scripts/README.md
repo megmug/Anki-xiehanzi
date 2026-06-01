@@ -16,6 +16,7 @@ Pipeline stages:
 - `deck_build_common.py`: shared template, media, model, and stable-id helpers.
 - `generate_hanzi_deck.py`: generate the APKG from the enriched JSON database.
   It reads `deck_inputs/deck_config.json` to select which hanzi study targets become notes.
+- `diff_apkg.py`: compare two APKG files semantically and write a Markdown diff report.
 - `migrate-*.py`: stateful Anki Debug Console migration scripts.
   A filename `migrate-<old-hash>.py` migrates from that old build hash to the target APKG it is released with.
 - `update_cc_cedict_snapshot.py`: refresh the pinned CC-CEDICT snapshot when an intentional source-data update is needed.
