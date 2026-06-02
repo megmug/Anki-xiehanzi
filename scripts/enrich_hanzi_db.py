@@ -25,6 +25,7 @@ import html
 import json
 import re
 import unicodedata
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -73,29 +74,65 @@ def printable_key(key: tuple[str, str]) -> str:
 PINYIN_SEPARATOR_RE = re.compile(r"[\s'’\-·]+")
 
 
-def normalize_pinyin_lookup_key(value: str) -> str:
-    return PINYIN_SEPARATOR_RE.sub(
-        "",
-        normalize_field(value).replace("u:", "v").replace("ü", "v"),
+@dataclass(frozen=True)
+class PinyinReading:
+    spaced: str
+    compact: str
+    lower_compact: str
+
+
+def normalize_pinyin_u_variants(value: str) -> str:
+    return (
+        value.replace("ü", "v")
+        .replace("Ü", "V")
+        .replace("u:", "v")
+        .replace("U:", "V")
     )
+
+
+def numbered_pinyin_part(value: str) -> str:
+    value = unicodedata.normalize("NFC", value.strip())
+    if not value:
+        return ""
+    if re.search(r"\d", value):
+        numbered = value
+    else:
+        try:
+            numbered = transcriptions.accented_to_numbered(value)
+        except ValueError:
+            numbered = value
+    return normalize_pinyin_u_variants(numbered)
+
+
+def canonical_pinyin_readings(value: str) -> list[PinyinReading]:
+    readings: list[PinyinReading] = []
+    for part in re.split(r"/", value or ""):
+        numbered = numbered_pinyin_part(part)
+        if not numbered:
+            continue
+
+        spaced = PINYIN_SEPARATOR_RE.sub(" ", numbered).strip()
+        spaced = re.sub(r"\s+", " ", spaced)
+        compact = spaced.replace(" ", "")
+        if compact:
+            readings.append(PinyinReading(
+                spaced=spaced,
+                compact=compact,
+                lower_compact=compact.lower(),
+            ))
+    return readings
+
+
+def normalize_pinyin_lookup_key(value: str) -> str:
+    readings = canonical_pinyin_readings(value)
+    return readings[0].lower_compact if readings else ""
 
 
 def pinyin_lookup_keys(value: str) -> list[str]:
     keys: list[str] = []
-    for part in re.split(r"/", value or ""):
-        if not part.strip():
-            continue
-
-        if re.search(r"\d", part):
-            numbered = part
-        else:
-            try:
-                numbered = transcriptions.accented_to_numbered(part)
-            except ValueError:
-                numbered = part
-
-        key = normalize_pinyin_lookup_key(numbered)
-        if key and key not in keys:
+    for reading in canonical_pinyin_readings(value):
+        key = reading.lower_compact
+        if key not in keys:
             keys.append(key)
     return keys
 
@@ -349,21 +386,89 @@ def prefer_first(values: list[str], value: str) -> None:
     values.insert(0, value)
 
 
+def pinyin_pair_match_type(form_pinyin: str, entry_pinyin: str) -> str | None:
+    best_score = -1
+    best_match_type: str | None = None
+    for form_reading in canonical_pinyin_readings(form_pinyin):
+        for entry_reading in canonical_pinyin_readings(entry_pinyin):
+            if form_reading.lower_compact != entry_reading.lower_compact:
+                continue
+            if form_reading.spaced == entry_reading.spaced:
+                match_type = "exact"
+            elif form_reading.compact == entry_reading.compact:
+                match_type = "format_variant"
+            else:
+                match_type = "case_variant"
+
+            score = match_type_score(match_type)
+            if score > best_score:
+                best_match_type = match_type
+                best_score = score
+    return best_match_type
+
+
+def match_type_score(match_type: str | None) -> int:
+    return {
+        "exact": 100,
+        "format_variant": 90,
+        "case_variant": 80,
+        "reading_variant": 70,
+        "toneless": 60,
+        "created": 0,
+        None: -1,
+    }[match_type]
+
+
+def classify_pinyin_match(form_pinyin: str, entry_pinyin: str) -> str | None:
+    match_type = pinyin_pair_match_type(form_pinyin, entry_pinyin)
+    if not match_type:
+        return None
+    if pinyin_lookup_keys(form_pinyin) != pinyin_lookup_keys(entry_pinyin):
+        return "reading_variant"
+    return match_type
+
+
+def record_form_match(form_stats: dict[str, Any], match_type: str) -> None:
+    form_stats["match_types"][match_type] += 1
+    if match_type == "reading_variant":
+        form_stats["matched_pinyin_variant"] += 1
+
+
 def find_or_create_hanzi_form(
     word: dict[str, Any],
     entry: dict[str, Any],
     form_stats: dict[str, Any],
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], str]:
     forms = word.setdefault("forms", [])
     entry_keys = pinyin_lookup_keys(entry["pinyin"])
 
+    matching_forms: list[tuple[dict[str, Any], str]] = []
     for form in forms:
-        form_keys = pinyin_lookup_keys(str(form.get("pinyin") or ""))
-        if set(form_keys).intersection(entry_keys):
+        match_type = classify_pinyin_match(str(form.get("pinyin") or ""), entry["pinyin"])
+        if match_type:
+            matching_forms.append((form, match_type))
+
+    if len(matching_forms) > 1:
+        best_match = None
+        best_match_type = None
+        best_score = -1
+
+        for form, match_type in matching_forms:
+            score = match_type_score(match_type)
+            if score > best_score:
+                best_match = form
+                best_match_type = match_type
+                best_score = score
+
+        if best_match and best_match_type:
             form_stats["matched"] += 1
-            if form_keys != entry_keys:
-                form_stats["matched_pinyin_variant"] += 1
-            return form
+            record_form_match(form_stats, best_match_type)
+            return best_match, best_match_type
+
+    for form, match_type in matching_forms:
+        form_stats["matched"] += 1
+        record_form_match(form_stats, match_type)
+        return form, match_type
 
     entry_toneless_keys = toneless_pinyin_lookup_keys(entry["pinyin"])
     toneless_matches = [
@@ -374,7 +479,8 @@ def find_or_create_hanzi_form(
     if len(toneless_matches) == 1:
         form_stats["matched"] += 1
         form_stats["matched_toneless"] += 1
-        return toneless_matches[0]
+        record_form_match(form_stats, "toneless")
+        return toneless_matches[0], "toneless"
 
     form = {
         "traditional_variants": [],
@@ -385,6 +491,7 @@ def find_or_create_hanzi_form(
     forms.append(form)
     forms.sort(key=lambda form: form["pinyin"])
     form_stats["created"] += 1
+    record_form_match(form_stats, "created")
     form_stats["created_entries"].append({
         "entry": entry_summary(entry),
         "lookup_key": entry_keys[0] if entry_keys else "",
@@ -395,13 +502,13 @@ def find_or_create_hanzi_form(
             if existing_form is not form
         ],
     })
-    return form
+    return form, "created"
 
 
 def attach_deck_entries_to_words(
     words: list[dict[str, Any]],
     deck_entries: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], dict[str, int]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     word_index = build_word_index(words)
     unmatched: list[dict[str, Any]] = []
     form_stats = {
@@ -409,6 +516,14 @@ def attach_deck_entries_to_words(
         "matched_pinyin_variant": 0,
         "matched_toneless": 0,
         "created": 0,
+        "match_types": {
+            "exact": 0,
+            "format_variant": 0,
+            "case_variant": 0,
+            "reading_variant": 0,
+            "toneless": 0,
+            "created": 0,
+        },
         "created_entries": [],
     }
 
@@ -425,7 +540,7 @@ def attach_deck_entries_to_words(
         hanzi = word.setdefault("hanzi", {})
         hanzi.setdefault("frequency", entry["frequency"])
 
-        form = find_or_create_hanzi_form(word, entry, form_stats)
+        form, _match_type = find_or_create_hanzi_form(word, entry, form_stats)
         prefer_first(form.setdefault("traditional_variants", []), entry["traditional"])
         append_unique(form.setdefault("tags", []), entry["tags"])
         form["tags"].sort()
@@ -559,6 +674,10 @@ def enrich_database(
             "deck_entries_by_level": summarize_by_level(deck_entries),
             "hanzi_form_targets": form_stats["matched"] + form_stats["created"],
             "hanzi_form_matches": form_stats["matched"],
+            "hanzi_form_exact_matches": form_stats["match_types"]["exact"],
+            "hanzi_form_format_variant_matches": form_stats["match_types"]["format_variant"],
+            "hanzi_form_case_variant_matches": form_stats["match_types"]["case_variant"],
+            "hanzi_form_reading_variant_matches": form_stats["match_types"]["reading_variant"],
             "hanzi_form_pinyin_variant_matches": form_stats["matched_pinyin_variant"],
             "hanzi_form_toneless_matches": form_stats["matched_toneless"],
             "hanzi_form_stubs_created": form_stats["created"],
