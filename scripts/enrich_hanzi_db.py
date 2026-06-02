@@ -520,6 +520,58 @@ def find_or_create_hanzi_form(
     return form, "created"
 
 
+def pinyin_formatting_key(value: str) -> str:
+    return "/".join(reading.compact for reading in canonical_pinyin_readings(value))
+
+
+def apply_reference_pinyin_case(source_pinyin: str, reference_pinyin: str) -> str:
+    reference_by_key = {
+        reading.lower_compact: reading.compact
+        for reading in canonical_pinyin_readings(reference_pinyin)
+    }
+    cased_tokens: list[str] = []
+
+    for source_part in re.split(r"(/)", source_pinyin or ""):
+        if source_part == "/":
+            cased_tokens.append(source_part)
+            continue
+
+        leading_space = re.match(r"\s*", source_part).group(0)
+        trailing_space = re.search(r"\s*$", source_part).group(0)
+        stripped_source = source_part.strip()
+        if not stripped_source:
+            cased_tokens.append(source_part)
+            continue
+
+        numbered_source = numbered_pinyin_part(stripped_source)
+        source_readings = canonical_pinyin_readings(numbered_source)
+        if not source_readings:
+            cased_tokens.append(source_part)
+            continue
+
+        reference_compact = reference_by_key.get(source_readings[0].lower_compact)
+        if not reference_compact:
+            cased_tokens.append(f"{leading_space}{numbered_source}{trailing_space}")
+            continue
+
+        chars = list(numbered_source)
+        reference_index = 0
+        for index, char in enumerate(chars):
+            if PINYIN_SEPARATOR_RE.fullmatch(char):
+                continue
+            if reference_index >= len(reference_compact):
+                break
+
+            reference_char = reference_compact[reference_index]
+            if char.isalpha() and reference_char.isalpha() and char.lower() == reference_char.lower():
+                chars[index] = char.upper() if reference_char.isupper() else char.lower()
+            reference_index += 1
+
+        cased_tokens.append(f"{leading_space}{''.join(chars)}{trailing_space}")
+
+    return "".join(cased_tokens)
+
+
 def numbered_pinyin(value: str) -> str:
     if re.search(r"\d", value):
         return normalize_pinyin_u_variants(value)
@@ -577,6 +629,9 @@ def attach_deck_entries_to_words(
         "created_entries": [],
         "non_exact_matches": [],
         "non_exact_definition_mismatches": [],
+        "pinyin_case_preserved": [],
+        "pinyin_whitespace_only": [],
+        "pinyin_substantive": [],
     }
 
     for entry in deck_entries:
@@ -615,10 +670,33 @@ def attach_deck_entries_to_words(
         form["tags"].sort()
 
         if entry.get("pinyin"):
-            try:
-                form["pinyin"] = transcriptions.accented_to_numbered(entry["pinyin"])
-            except ValueError:
-                pass
+            new_pinyin = xiehanzi_pinyin
+            old_pinyin = form.get("pinyin")
+            if old_pinyin and match_type != "created":
+                cased_pinyin = apply_reference_pinyin_case(new_pinyin, str(old_pinyin))
+                if cased_pinyin != new_pinyin:
+                    form_stats["pinyin_case_preserved"].append({
+                        "simplified": entry["simplified"],
+                        "cc_cedict_pinyin": old_pinyin,
+                        "xiehanzi_pinyin": new_pinyin,
+                        "merged_pinyin": cased_pinyin,
+                        "match_type": match_type,
+                    })
+                    new_pinyin = cased_pinyin
+            if old_pinyin and old_pinyin != new_pinyin and match_type != "created":
+                override_record = {
+                    "simplified": entry["simplified"],
+                    "cc_cedict_pinyin": old_pinyin,
+                    "xiehanzi_pinyin": new_pinyin,
+                    "match_type": match_type,
+                    "cc_cedict_definitions": form.get("definitions", []),
+                    "xiehanzi_definitions": definitions_from_meaning_html(entry["meaning_html"]),
+                }
+                if pinyin_formatting_key(str(old_pinyin)) == pinyin_formatting_key(new_pinyin):
+                    form_stats["pinyin_whitespace_only"].append(override_record)
+                else:
+                    form_stats["pinyin_substantive"].append(override_record)
+            form["pinyin"] = new_pinyin
 
     return unmatched, form_stats
 
@@ -765,6 +843,9 @@ def enrich_database(
             "hanzi_form_stubs_created": form_stats["created"],
             "hanzi_non_exact_matches": len(form_stats["non_exact_matches"]),
             "hanzi_non_exact_definition_mismatches": len(form_stats["non_exact_definition_mismatches"]),
+            "hanzi_pinyin_case_preserved": len(form_stats["pinyin_case_preserved"]),
+            "hanzi_pinyin_whitespace_only": len(form_stats["pinyin_whitespace_only"]),
+            "hanzi_pinyin_substantive": len(form_stats["pinyin_substantive"]),
             "frequency_tags_by_word": frequency_tag_stats["tagged_words_by_threshold"],
             "frequency_tags_by_form": frequency_tag_stats["tagged_forms_by_threshold"],
         },
