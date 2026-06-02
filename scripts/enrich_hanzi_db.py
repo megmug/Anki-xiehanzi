@@ -43,6 +43,16 @@ DEFAULT_FREQUENCY_LIST = (
 )
 TOP_FREQUENCY_THRESHOLDS = (500, 2500, 10000)
 
+# Corrections for known pinyin defects in the xiehanzi TSV column. These keep
+# the read-only source files unchanged while allowing the matcher to target the
+# intended CC-CEDICT form.
+HANZI_PINYIN_OVERRIDES = {
+    ("标致", "7-9"): "biao1zhi5",
+    ("疼爱", "7-9"): "teng2ai4",
+    ("脚踏实地", "7-9"): "jiao3ta4shi2di4",
+    ("蹊跷", "7-9"): "qi1qiao1",
+}
+
 LEVELS = ["1", "2", "3", "4", "5", "6", "7-9"]
 HANZI_FIELDS = [
     "Simplified",
@@ -186,7 +196,7 @@ def level_tags(source_level: str, raw_level: str) -> list[str]:
 
 
 def entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
-    return {
+    summary = {
         "simplified": entry["simplified"],
         "traditional": entry["traditional"],
         "pinyin": entry["pinyin"],
@@ -195,6 +205,9 @@ def entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
         "raw_level": entry["raw_level"],
         "source": entry["source"],
     }
+    if entry.get("raw_pinyin") and entry["raw_pinyin"] != entry["pinyin"]:
+        summary["raw_pinyin"] = entry["raw_pinyin"]
+    return summary
 
 
 def make_entry(
@@ -209,7 +222,8 @@ def make_entry(
 
     simplified = row[0]
     traditional = row[1]
-    pinyin = row[2]
+    raw_pinyin = row[2]
+    pinyin = HANZI_PINYIN_OVERRIDES.get((simplified, deck_level), raw_pinyin)
     zhuyin = row[3]
     raw_level = row[4]
     pos = row[5]
@@ -221,6 +235,7 @@ def make_entry(
         "simplified": simplified,
         "traditional": traditional,
         "pinyin": pinyin,
+        "raw_pinyin": raw_pinyin,
         "zhuyin": zhuyin,
         "deck_level": deck_level,
         "raw_level": raw_level,
