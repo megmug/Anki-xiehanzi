@@ -24,6 +24,16 @@ let
     else if gitHead != "" && !(pkgs.lib.hasPrefix "ref: " gitHead) then gitHead
     else "unknown";
   resolvedBuildId = if gitCommit == "unknown" then "unknown" else builtins.substring 0 7 gitCommit;
+  deckConfigPath = ./deck_inputs/deck_config.json;
+  deckConfig = if builtins.pathExists deckConfigPath then builtins.fromJSON (builtins.readFile deckConfigPath) else {};
+  deckAudioConfig = deckConfig.audio or {};
+  deckAudioEngine =
+    if builtins.isAttrs deckAudioConfig
+    then deckAudioConfig.engine or "off"
+    else "off";
+  normalizedDeckAudioEngine =
+    pkgs.lib.toLower (pkgs.lib.replaceStrings ["-"] ["_"] (toString deckAudioEngine));
+  needsNetworkBuild = normalizedDeckAudioEngine == "kokoro";
 
   pythonBase = pkgs.python313;
   pythonPackages = pythonBase.pkgs;
@@ -56,13 +66,58 @@ let
     doCheck = false;
   };
 
-  # Kokoro and its heavy transitive dependencies are not available in
-  # nixpkgs. We install them via pip during the buildPhase into an
-  # isolated prefix. Network access is required (__noChroot = true).
+  proces = pythonPackages.buildPythonPackage rec {
+    pname = "proces";
+    version = "0.1.7";
+    format = "setuptools";
+
+    src = pkgs.fetchPypi {
+      inherit pname version;
+      hash = "sha256-cKBdnpc91oX3qQksWL5pWoGBpBHWN5bCEyMv0/3EN3U=";
+    };
+
+    doCheck = false;
+  };
+
+  cn2an = pythonPackages.buildPythonPackage rec {
+    pname = "cn2an";
+    version = "0.5.24";
+    format = "setuptools";
+
+    src = pkgs.fetchPypi {
+      inherit pname version;
+      hash = "sha256-wnbPxLPJ51ghSEHeWXUC6xeN5QuNomM+00VWT5BwXw4=";
+    };
+
+    propagatedBuildInputs = [
+      proces
+    ];
+
+    doCheck = false;
+  };
+
+  pypinyin-dict = pythonPackages.buildPythonPackage rec {
+    pname = "pypinyin-dict";
+    version = "0.9.0";
+    format = "setuptools";
+
+    src = pkgs.fetchPypi {
+      pname = "pypinyin_dict";
+      inherit version;
+      hash = "sha256-jEkTlrqhVnMR8ux1nLwVRjjzvO/ccR005T43PjpCn6U=";
+    };
+
+    propagatedBuildInputs = with pythonPackages; [
+      pypinyin
+    ];
+
+    doCheck = false;
+  };
 
   pythonEnv = pythonBase.withPackages (ps: with ps; [
     colorize-pinyin
     pinyin-tone-converter
+    cn2an
     dragonmapper
     edge-tts
     genanki
@@ -74,7 +129,9 @@ let
     numpy
     scipy
     soundfile
-  ]);
+    kokoro
+    pypinyin-dict
+  ] ++ misaki.optional-dependencies.zh);
 
   yarnOfflineCache = pkgs.fetchYarnDeps {
     yarnLock = ./yarn.lock;
@@ -133,10 +190,10 @@ let
       ffmpeg
     ];
 
-    # Allow network access during build so pip can install Kokoro
-    # and download HuggingFace model weights.
-    # NOTE: Requires sandbox = false or relaxed in nix.conf
-    __noChroot = true;
+    # Allow network access during audio builds so Kokoro can download
+    # HuggingFace model weights.
+    # NOTE: Requires sandbox = false or relaxed in nix.conf when network is used.
+    __noChroot = needsNetworkBuild;
 
     configurePhase = ''
       runHook preConfigure
@@ -159,18 +216,20 @@ let
       export REQUESTS_CA_BUNDLE="$SSL_CERT_FILE"
       export ANKI_HANZI_BUILD_ID="${resolvedBuildId}"
       echo "=== pip CUDA PyTorch: ${if enableCudaPip then "enabled" else "disabled"} ==="
+      AUDIO_ENGINE="${normalizedDeckAudioEngine}"
+      echo "=== deck audio engine: $AUDIO_ENGINE ==="
 
-      # Isolate pip-installed packages so they don't clash with Nix python
+      # Isolate the optional CUDA PyTorch wheel so it does not clash with Nix python.
       PYTHON_VERSION=$(python --version 2>&1 | cut -d' ' -f2 | cut -d'.' -f1,2)
-      PIP_PREFIX="$TMPDIR/kokoro-pip"
-      SITE_PACKAGES="$PIP_PREFIX/lib/python''${PYTHON_VERSION}/site-packages"
-      export PIP_PREFIX="$PIP_PREFIX"
+      CUDA_PIP_PREFIX="$TMPDIR/cuda-pip"
+      SITE_PACKAGES="$CUDA_PIP_PREFIX/lib/python''${PYTHON_VERSION}/site-packages"
       export PYTHONPATH="$SITE_PACKAGES:$PYTHONPATH"
-      export PATH="$PIP_PREFIX/bin:$PATH"
+      export PATH="$CUDA_PIP_PREFIX/bin:$PATH"
       export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-      mkdir -p "$PIP_PREFIX"
+      mkdir -p "$CUDA_PIP_PREFIX"
 
       ${pkgs.lib.optionalString enableCudaPip ''
+      if [ "$AUDIO_ENGINE" = "kokoro" ]; then
       CUDA_DRIVER_LIB_DIR="$TMPDIR/nvidia-driver-libs"
       mkdir -p "$CUDA_DRIVER_LIB_DIR"
       for driver_lib in \
@@ -191,35 +250,47 @@ let
         fi
       done
 
-      echo "=== Installing CUDA-enabled PyTorch wheel into pip prefix ==="
-      if ! pip install --prefix "$PIP_PREFIX" --no-cache-dir \
+      echo "=== Installing CUDA-enabled PyTorch wheel into isolated pip prefix ==="
+      if ! pip install --prefix "$CUDA_PIP_PREFIX" --no-cache-dir \
         --ignore-installed --force-reinstall \
         --index-url "${cudaTorchIndexUrl}" \
         "torch==${cudaTorchVersion}"; then
         echo "WARNING: CUDA PyTorch wheel installation failed; falling back to Nix CPU PyTorch"
-        rm -rf "$PIP_PREFIX"
-        mkdir -p "$PIP_PREFIX"
+        rm -rf "$CUDA_PIP_PREFIX"
+        mkdir -p "$CUDA_PIP_PREFIX"
       else
         export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib:$CUDA_DRIVER_LIB_DIR''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         if ! python -c "import ctypes.util, torch; print('=== PyTorch', torch.__version__, 'from', torch.__file__, 'CUDA', torch.version.cuda, 'available', torch.cuda.is_available(), 'devices', torch.cuda.device_count(), 'libcuda', ctypes.util.find_library('cuda'), '===')"; then
           echo "WARNING: CUDA PyTorch import/probe failed; falling back to Nix CPU PyTorch"
-          rm -rf "$PIP_PREFIX"
-          mkdir -p "$PIP_PREFIX"
+          rm -rf "$CUDA_PIP_PREFIX"
+          mkdir -p "$CUDA_PIP_PREFIX"
           export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib"
         fi
       fi
+      else
+        echo "=== Skipping CUDA PyTorch wheel: audio engine is $AUDIO_ENGINE ==="
+      fi
       ''}
 
-      # Install Kokoro + Chinese G2P deps if not present
-      if ! python -c "import kokoro" 2>/dev/null; then
-        echo "=== Installing Kokoro and Chinese G2P dependencies ==="
-        pip install --prefix "$PIP_PREFIX" --no-cache-dir \
-          kokoro misaki[zh] ordered-set pypinyin cn2an jieba
+      # Kokoro and its Chinese G2P dependencies come from the Nix python env.
+      if [ "$AUDIO_ENGINE" = "kokoro" ]; then
         if ! python -c "import kokoro" 2>/dev/null; then
-          echo "ERROR: Kokoro installation failed"
+          echo "ERROR: Kokoro import failed in Nix python environment"
           exit 1
         fi
-        echo "=== Kokoro installation complete ==="
+        if ! python - <<'PY' 2>/dev/null; then
+from kokoro import KPipeline
+KPipeline(lang_code="z")
+PY
+          echo "ERROR: Kokoro Chinese pipeline failed in Nix python environment"
+          exit 1
+        fi
+        echo "=== Kokoro Chinese pipeline available ==="
+      else
+        if ! python -c "import kokoro" 2>/dev/null; then
+          echo "ERROR: Kokoro import failed in Nix python environment"
+          exit 1
+        fi
       fi
 
       python scripts/build_cc_cedict_master_db.py
