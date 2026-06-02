@@ -505,6 +505,41 @@ def find_or_create_hanzi_form(
     return form, "created"
 
 
+def numbered_pinyin(value: str) -> str:
+    if re.search(r"\d", value):
+        return normalize_pinyin_u_variants(value)
+    try:
+        return transcriptions.accented_to_numbered(value)
+    except ValueError:
+        return value
+
+
+def non_exact_match_record(
+    entry: dict[str, Any],
+    match_type: str,
+    cc_cedict_pinyin: str | None,
+    cc_cedict_definitions: list[str],
+    xiehanzi_pinyin: str,
+) -> dict[str, Any]:
+    return {
+        "simplified": entry["simplified"],
+        "match_type": match_type,
+        "cc_cedict_pinyin": cc_cedict_pinyin,
+        "xiehanzi_pinyin": xiehanzi_pinyin,
+        "xiehanzi_raw_pinyin": entry.get("raw_pinyin", entry["pinyin"]),
+        "cc_cedict_definitions": cc_cedict_definitions,
+        "xiehanzi_definitions": definitions_from_meaning_html(entry["meaning_html"]),
+    }
+
+
+def normalized_definition_set(definitions: list[str]) -> set[str]:
+    return {re.sub(r"\s+", " ", definition).strip() for definition in definitions if definition.strip()}
+
+
+def definitions_differ(left: list[str], right: list[str]) -> bool:
+    return normalized_definition_set(left) != normalized_definition_set(right)
+
+
 def attach_deck_entries_to_words(
     words: list[dict[str, Any]],
     deck_entries: list[dict[str, Any]],
@@ -525,6 +560,8 @@ def attach_deck_entries_to_words(
             "created": 0,
         },
         "created_entries": [],
+        "non_exact_matches": [],
+        "non_exact_definition_mismatches": [],
     }
 
     for entry in deck_entries:
@@ -540,7 +577,24 @@ def attach_deck_entries_to_words(
         hanzi = word.setdefault("hanzi", {})
         hanzi.setdefault("frequency", entry["frequency"])
 
-        form, _match_type = find_or_create_hanzi_form(word, entry, form_stats)
+        form, match_type = find_or_create_hanzi_form(word, entry, form_stats)
+        cc_cedict_pinyin = None if match_type == "created" else str(form.get("pinyin") or "")
+        cc_cedict_definitions = [] if match_type == "created" else list(form.get("definitions") or [])
+        xiehanzi_pinyin = numbered_pinyin(entry["pinyin"])
+        if match_type != "exact":
+            match_record = non_exact_match_record(
+                entry=entry,
+                match_type=match_type,
+                cc_cedict_pinyin=cc_cedict_pinyin,
+                cc_cedict_definitions=cc_cedict_definitions,
+                xiehanzi_pinyin=xiehanzi_pinyin,
+            )
+            form_stats["non_exact_matches"].append(match_record)
+            if (
+                match_type != "created"
+                and definitions_differ(match_record["cc_cedict_definitions"], match_record["xiehanzi_definitions"])
+            ):
+                form_stats["non_exact_definition_mismatches"].append(match_record)
         prefer_first(form.setdefault("traditional_variants", []), entry["traditional"])
         append_unique(form.setdefault("tags", []), entry["tags"])
         form["tags"].sort()
@@ -616,6 +670,19 @@ def summarize_by_level(entries: list[dict[str, Any]]) -> dict[str, int]:
     return counts
 
 
+def group_non_exact_matches(records: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    groups = {
+        "format_variant": [],
+        "case_variant": [],
+        "reading_variant": [],
+        "toneless": [],
+        "created": [],
+    }
+    for record in records:
+        groups.setdefault(record["match_type"], []).append(record)
+    return groups
+
+
 def enrich_database(
     master_db_path: Path,
     output_path: Path,
@@ -681,6 +748,8 @@ def enrich_database(
             "hanzi_form_pinyin_variant_matches": form_stats["matched_pinyin_variant"],
             "hanzi_form_toneless_matches": form_stats["matched_toneless"],
             "hanzi_form_stubs_created": form_stats["created"],
+            "hanzi_non_exact_matches": len(form_stats["non_exact_matches"]),
+            "hanzi_non_exact_definition_mismatches": len(form_stats["non_exact_definition_mismatches"]),
             "frequency_tags_by_word": frequency_tag_stats["tagged_words_by_threshold"],
             "frequency_tags_by_form": frequency_tag_stats["tagged_forms_by_threshold"],
         },
@@ -707,6 +776,10 @@ def enrich_database(
             "synthetic_words": synthetic_words[:25],
             "missing_deck_entries_after_stubs": missing_deck_after_stubs[:25],
             "hanzi_form_stubs": form_stats["created_entries"],
+            "hanzi_non_exact_definition_mismatches": form_stats["non_exact_definition_mismatches"],
+            "hanzi_non_exact_definition_mismatches_by_type": group_non_exact_matches(
+                form_stats["non_exact_definition_mismatches"]
+            ),
             "dropped_duplicates": dropped_duplicates[:25],
         },
     }
