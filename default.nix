@@ -5,8 +5,8 @@
 , buildId ? null
 , pkgs ? import ( builtins.fetchGit {
     url = "https://github.com/nixos/nixpkgs/";
-    ref = "nixos-25.11";
-    rev = "d7a713c0b7e47c908258e71cba7a2d77cc8d71d5";
+    ref = "nixos-26.05";
+    rev = "b51242d7d43689db2f3be91bd05d5b24fbb469c4";
 } ) {
   inherit system;
 }
@@ -25,7 +25,10 @@ let
     else "unknown";
   resolvedBuildId = if gitCommit == "unknown" then "unknown" else builtins.substring 0 7 gitCommit;
 
-  colorize-pinyin = pkgs.python312Packages.buildPythonPackage rec {
+  pythonBase = pkgs.python313;
+  pythonPackages = pythonBase.pkgs;
+
+  colorize-pinyin = pythonPackages.buildPythonPackage rec {
     pname = "colorize-pinyin";
     version = "2.1.1";
     format = "setuptools";
@@ -39,7 +42,7 @@ let
     doCheck = false;
   };
 
-  pinyin-tone-converter = pkgs.python312Packages.buildPythonPackage rec {
+  pinyin-tone-converter = pythonPackages.buildPythonPackage rec {
     pname = "pinyin-tone-converter";
     version = "1.0.2";
     format = "setuptools";
@@ -56,7 +59,6 @@ let
   # Kokoro and its heavy transitive dependencies are not available in
   # nixpkgs. We install them via pip during the buildPhase into an
   # isolated prefix. Network access is required (__noChroot = true).
-  pythonBase = pkgs.python312;
 
   pythonEnv = pythonBase.withPackages (ps: with ps; [
     colorize-pinyin
