@@ -25,3 +25,5 @@ ci-artifacts/
 
 .backup
 .config
+
+.codex
