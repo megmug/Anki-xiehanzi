@@ -1,7 +1,7 @@
 { system ? builtins.currentSystem
 , enableCuda ? false
-, cudaTorchVersion ? "2.9.1"
-, cudaTorchIndexUrl ? "https://download.pytorch.org/whl/cu128"
+, cudaTorchVersion ? "2.12.0"
+, cudaTorchIndexUrl ? "https://download.pytorch.org/whl/cu130"
 , buildId ? null
 , pkgs ? import ( builtins.fetchGit {
     url = "https://github.com/nixos/nixpkgs/";
