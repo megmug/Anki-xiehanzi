@@ -1,5 +1,4 @@
 { system ? builtins.currentSystem
-, enableCuda ? false
 , cudaTorchVersion ? "2.12.0"
 , cudaTorchIndexUrl ? "https://download.pytorch.org/whl/cu130"
 , buildId ? null
@@ -13,7 +12,6 @@
 }:
 
 let
-  enableCudaPip = enableCuda && pkgs.stdenv.isLinux;
   gitHeadPath = ./.git/HEAD;
   gitHead = if builtins.pathExists gitHeadPath then pkgs.lib.trim (builtins.readFile gitHeadPath) else "";
   gitHeadRef = if pkgs.lib.hasPrefix "ref: " gitHead then pkgs.lib.removePrefix "ref: " gitHead else "";
@@ -31,9 +29,23 @@ let
     if builtins.isAttrs deckAudioConfig
     then deckAudioConfig.engine or "off"
     else "off";
-  normalizedDeckAudioEngine =
+  rawNormalizedDeckAudioEngine =
     pkgs.lib.toLower (pkgs.lib.replaceStrings ["-"] ["_"] (toString deckAudioEngine));
-  needsNetworkBuild = normalizedDeckAudioEngine == "kokoro";
+  supportedAudioEngines = [ "off" "kokoro" "edge_tts" ];
+  normalizedDeckAudioEngine =
+    if builtins.elem rawNormalizedDeckAudioEngine supportedAudioEngines
+    then rawNormalizedDeckAudioEngine
+    else builtins.throw "deck_inputs/deck_config.json audio.engine must be one of: off, kokoro, edge_tts";
+  needsKokoroAudio = normalizedDeckAudioEngine == "kokoro";
+  needsEdgeTtsAudio = normalizedDeckAudioEngine == "edge_tts";
+  needsAudioBuild = needsKokoroAudio || needsEdgeTtsAudio;
+  needsNetworkBuild = needsAudioBuild;
+
+  enableCudaPip = needsKokoroAudio && pkgs.stdenv.isLinux;
+  kokoroAudioSupported =
+    if needsKokoroAudio && pkgs.stdenv.isDarwin
+    then builtins.throw "audio.engine=kokoro is not supported by this Nix build on Darwin because nixpkgs kokoro depends on Darwin-broken dlinfo via phonemizer. Use audio.engine=off or edge_tts on macOS."
+    else true;
 
   pythonBase = pkgs.python313;
   pythonPackages = pythonBase.pkgs;
@@ -114,16 +126,18 @@ let
     doCheck = false;
   };
 
-  pythonEnv = pythonBase.withPackages (ps: with ps; [
+  pythonEnv = assert kokoroAudioSupported; pythonBase.withPackages (ps: with ps; [
     colorize-pinyin
     pinyin-tone-converter
     cn2an
     dragonmapper
-    edge-tts
     genanki
     pip
     setuptools
     wheel
+  ] ++ pkgs.lib.optionals needsEdgeTtsAudio [
+    edge-tts
+  ] ++ pkgs.lib.optionals needsKokoroAudio ([
     # Core deps already present in nixpkgs that Kokoro reuses
     torch
     numpy
@@ -131,7 +145,7 @@ let
     soundfile
     kokoro
     pypinyin-dict
-  ] ++ misaki.optional-dependencies.zh);
+  ] ++ misaki.optional-dependencies.zh));
 
   yarnOfflineCache = pkgs.fetchYarnDeps {
     yarnLock = ./yarn.lock;
@@ -215,9 +229,9 @@ let
       export SSL_CERT_FILE="${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
       export REQUESTS_CA_BUNDLE="$SSL_CERT_FILE"
       export ANKI_HANZI_BUILD_ID="${resolvedBuildId}"
-      echo "=== pip CUDA PyTorch: ${if enableCudaPip then "enabled" else "disabled"} ==="
       AUDIO_ENGINE="${normalizedDeckAudioEngine}"
       echo "=== deck audio engine: $AUDIO_ENGINE ==="
+      echo "=== pip CUDA PyTorch: ${if enableCudaPip then "auto/probe" else "disabled"} ==="
 
       # Isolate the optional CUDA PyTorch wheel so it does not clash with Nix python.
       PYTHON_VERSION=$(python --version 2>&1 | cut -d' ' -f2 | cut -d'.' -f1,2)
@@ -229,9 +243,9 @@ let
       mkdir -p "$CUDA_PIP_PREFIX"
 
       ${pkgs.lib.optionalString enableCudaPip ''
-      if [ "$AUDIO_ENGINE" = "kokoro" ]; then
       CUDA_DRIVER_LIB_DIR="$TMPDIR/nvidia-driver-libs"
       mkdir -p "$CUDA_DRIVER_LIB_DIR"
+      CUDA_DRIVER_FOUND=0
       for driver_lib in \
         /run/opengl-driver/lib \
         /usr/lib/x86_64-linux-gnu \
@@ -250,29 +264,59 @@ let
         fi
       done
 
-      echo "=== Installing CUDA-enabled PyTorch wheel into isolated pip prefix ==="
-      if ! pip install --prefix "$CUDA_PIP_PREFIX" --no-cache-dir \
-        --ignore-installed --force-reinstall \
-        --index-url "${cudaTorchIndexUrl}" \
-        "torch==${cudaTorchVersion}"; then
-        echo "WARNING: CUDA PyTorch wheel installation failed; falling back to Nix CPU PyTorch"
-        rm -rf "$CUDA_PIP_PREFIX"
-        mkdir -p "$CUDA_PIP_PREFIX"
+      if find "$CUDA_DRIVER_LIB_DIR" -maxdepth 1 -name 'libcuda.so*' -print -quit | grep -q .; then
+        CUDA_DRIVER_FOUND=1
+      elif command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+        CUDA_DRIVER_FOUND=1
+      fi
+
+      if [ "$CUDA_DRIVER_FOUND" != "1" ]; then
+        echo "=== No NVIDIA CUDA driver detected; using Nix CPU PyTorch ==="
       else
-        export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib:$CUDA_DRIVER_LIB_DIR''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-        if ! python -c "import ctypes.util, torch; print('=== PyTorch', torch.__version__, 'from', torch.__file__, 'CUDA', torch.version.cuda, 'available', torch.cuda.is_available(), 'devices', torch.cuda.device_count(), 'libcuda', ctypes.util.find_library('cuda'), '===')"; then
-          echo "WARNING: CUDA PyTorch import/probe failed; falling back to Nix CPU PyTorch"
+        echo "=== Installing CUDA-enabled PyTorch wheel into isolated pip prefix ==="
+        if ! pip install --prefix "$CUDA_PIP_PREFIX" --no-cache-dir \
+          --ignore-installed --force-reinstall \
+          --index-url "${cudaTorchIndexUrl}" \
+          "torch==${cudaTorchVersion}"; then
+          echo "WARNING: CUDA PyTorch wheel installation failed; falling back to Nix CPU PyTorch"
           rm -rf "$CUDA_PIP_PREFIX"
           mkdir -p "$CUDA_PIP_PREFIX"
-          export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib"
+        else
+          export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib:$CUDA_DRIVER_LIB_DIR''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          if ! python - <<'PY'; then
+import ctypes.util
+import sys
+import torch
+
+print(
+    "=== PyTorch",
+    torch.__version__,
+    "from",
+    torch.__file__,
+    "CUDA",
+    torch.version.cuda,
+    "available",
+    torch.cuda.is_available(),
+    "devices",
+    torch.cuda.device_count(),
+    "libcuda",
+    ctypes.util.find_library("cuda"),
+    "===",
+)
+if not torch.cuda.is_available() or torch.cuda.device_count() < 1:
+    sys.exit(1)
+PY
+            echo "WARNING: CUDA PyTorch import/probe failed; falling back to Nix CPU PyTorch"
+            rm -rf "$CUDA_PIP_PREFIX"
+            mkdir -p "$CUDA_PIP_PREFIX"
+            export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib"
+          fi
         fi
-      fi
-      else
-        echo "=== Skipping CUDA PyTorch wheel: audio engine is $AUDIO_ENGINE ==="
       fi
       ''}
 
-      # Kokoro and its Chinese G2P dependencies come from the Nix python env.
+      # Audio dependencies are included in the Nix python env only for the
+      # configured audio engine.
       if [ "$AUDIO_ENGINE" = "kokoro" ]; then
         if ! python -c "import kokoro" 2>/dev/null; then
           echo "ERROR: Kokoro import failed in Nix python environment"
@@ -286,11 +330,13 @@ PY
           exit 1
         fi
         echo "=== Kokoro Chinese pipeline available ==="
-      else
-        if ! python -c "import kokoro" 2>/dev/null; then
-          echo "ERROR: Kokoro import failed in Nix python environment"
+      fi
+      if [ "$AUDIO_ENGINE" = "edge_tts" ]; then
+        if ! python -c "import edge_tts" 2>/dev/null; then
+          echo "ERROR: edge-tts import failed in Nix python environment"
           exit 1
         fi
+        echo "=== edge-tts available ==="
       fi
 
       python scripts/build_cc_cedict_master_db.py

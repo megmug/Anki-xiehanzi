@@ -56,11 +56,9 @@ nix-build --no-sandbox
 Depending on your Nix configuration, `--no-sandbox` may require your account to be a trusted user.
 Refer to the Nix documentation if you need to configure this.
 
-On a Linux machine with an NVIDIA GPU, Nix can install CUDA-capable PyTorch for you.
-It puts PyTorch into the build's isolated temporary `pip` prefix, so there is no need to clean up afterward:
-```sh
-nix-build --arg enableCuda true --no-sandbox
-```
+On a Linux machine with an NVIDIA GPU and `audio.engine` set to `kokoro`, Nix probes for a usable CUDA driver and can install CUDA-capable PyTorch into the build's isolated temporary `pip` prefix.
+If no NVIDIA driver is available, or on macOS, the build uses CPU PyTorch.
+
 `nix-build` creates the default `result` symlink.
 The build result contains the hash-named APKG, generated reports, and any checked-in migration scripts.
 
