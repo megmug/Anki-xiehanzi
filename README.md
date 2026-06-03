@@ -65,7 +65,7 @@ The build result contains the hash-named APKG, generated reports, and any checke
 ## Repository Layout
 
 - `deck_inputs/`: committed source inputs for the deck build, including card templates, deck config, the pinned CC-CEDICT snapshot, and the HSK/xiehanzi word-list submodule.
-- `scripts/`: the Python build pipeline.
+- `tooling/`: Python build, utility, and shared helper code.
 - `.github/workflows/`: CI build workflow that runs the Nix build, uploads artifacts, and generates releases.
 - `result/`: where the build artifacts land.
 
@@ -75,7 +75,7 @@ The build uses the committed CC-CEDICT snapshot.
 To update that snapshot, run:
 
 ```sh
-nix-shell --run "python scripts/update_cc_cedict_snapshot.py"
+nix-shell --run "python tooling/utilities/update_cc_cedict_snapshot.py"
 ```
 
 Run this from the project root.
@@ -83,10 +83,10 @@ Then run `nix-build`, review the changed data and generated APKG, and commit the
 
 ## Migrating from a Previous Version
 
-Each release that changes deck identity includes a migration script under `scripts/`.
+Each release that changes deck identity includes a migration script under `tooling/utilities/`.
 The script name is `migrate-<hash>.py`, where `<hash>` is the short commit hash of the **previous** version you are upgrading from.
 
-Example: to upgrade a deck built from commit `e7eeb8e` to the current version, use `scripts/migrate-e7eeb8e.py`.
+Example: to upgrade a deck built from commit `e7eeb8e` to the current version, use `tooling/utilities/migrate-e7eeb8e.py`.
 
 ### How to migrate
 
@@ -110,7 +110,7 @@ The migration script:
 
 ### Keeping migration scripts
 
-Migration scripts are kept permanently in `scripts/`.
+Migration scripts are kept permanently in `tooling/utilities/`.
 When you later upgrade to a newer commit, use the matching `migrate-<hash>.py` for the commit you are upgrading from.
 You might need to migrate multiple times in a row, using the appropriate migration scripts, to catch up to the latest version.
 

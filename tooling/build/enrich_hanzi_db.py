@@ -14,7 +14,7 @@ generation.
 
 Run from the repository root inside the Nix shell:
 
-    nix-shell --run "python scripts/enrich_hanzi_db.py"
+    nix-shell --run "python tooling/build/enrich_hanzi_db.py"
 """
 
 from __future__ import annotations

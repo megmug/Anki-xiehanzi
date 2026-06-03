@@ -5,7 +5,7 @@ Build the customized hanzi APKG from the enriched JSON database.
 
 The generator reads word/card data from
 `master_db_output/cc_cedict_hanzi_enriched.json` and uses the shared deck
-build helpers in `scripts/deck_build_common.py` for templates, media, and stable
+build helpers in `tooling/lib/deck_build_common.py` for templates, media, and stable
 Anki ids.
 
 `deck_inputs/deck_config.json` controls which tagged hanzi forms are emitted
@@ -14,7 +14,7 @@ settings that are baked into the templates.
 
 Run from the repository root inside the Nix shell:
 
-    nix-shell --run "python scripts/generate_hanzi_deck.py"
+    nix-shell --run "python tooling/build/generate_hanzi_deck.py"
 """
 
 from __future__ import annotations
@@ -28,6 +28,10 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 
 import genanki
 

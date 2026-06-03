@@ -339,15 +339,15 @@ PY
         echo "=== edge-tts available ==="
       fi
 
-      python scripts/build_cc_cedict_master_db.py
-      python scripts/enrich_hanzi_db.py
+      python tooling/build/build_cc_cedict_master_db.py
+      python tooling/build/enrich_hanzi_db.py
 
       # Nix source paths use normalized mtimes that can predate ZIP's 1980
       # lower bound. Use the generator's fixed ZIP timestamp for all media
       # files materialized in this transitional store build.
       find . -type f -exec touch -t 202605200639.48 {} +
 
-      python scripts/generate_hanzi_deck.py \
+      python tooling/build/generate_hanzi_deck.py \
         --timestamp 1779251987.6 \
         --zip-generated-datetime 2026-05-20T06:39:48
 
@@ -362,7 +362,7 @@ PY
       cp build_reports/generate_hanzi_report.json "$out/"
       cp master_db_output/cc_cedict_hanzi_enriched.json "$out/"
       cp master_db_output/hanzi_enrichment_report.json "$out/"
-      find scripts -maxdepth 1 -type f -name 'migrate-*.py' -exec cp {} "$out/" \;
+      find tooling/utilities -maxdepth 1 -type f -name 'migrate-*.py' -exec cp {} "$out/" \;
 
       runHook postInstall
     '';

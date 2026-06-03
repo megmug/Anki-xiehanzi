@@ -4,7 +4,7 @@ Update the vendored CC-CEDICT snapshot.
 
 Usage:
 
-    python scripts/update_cc_cedict_snapshot.py
+    python tooling/utilities/update_cc_cedict_snapshot.py
 
 The normal build is intentionally offline and reads the committed text snapshot
 from deck_inputs/cc-cedict. This script downloads the latest archive from the
@@ -93,7 +93,7 @@ downloading the latest file during `nix-build`.
 To update the snapshot from the latest upstream export, run:
 
 ```sh
-nix-shell --run "python scripts/update_cc_cedict_snapshot.py"
+nix-shell --run "python tooling/utilities/update_cc_cedict_snapshot.py"
 ```
 
 The update command downloads the current archive from the URL below, validates
