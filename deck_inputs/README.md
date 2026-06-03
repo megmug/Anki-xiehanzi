@@ -6,8 +6,8 @@ This directory contains source inputs that are read to build this fork's APKG.
 
 - `hsk-3.0-words-list/`: upstream HSK/xiehanzi word-list submodule.
   The active build reads the prepared New HSK (2025) hanzi TSV files and frequency list.
-- `cc-cedict/`: pinned CC-CEDICT snapshot used to generate the compact master lexicon before enrichment.
-- `deck_config.json`: first-pass deck selection config.
+- `cc-cedict/`: pinned CC-CEDICT snapshot used to build the internal lexicon state.
+- `deck_config.json`: deck selection config.
   It selects which enriched hanzi study targets become generated notes, such as all HSK levels plus specific Simplified words.
   It can also include an optional `card_settings` object to bake card display settings into the generated templates per card type and side.
 - `card_templates/`: active Anki card HTML/CSS templates and static media packaged into the APKG.

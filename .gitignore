@@ -2,7 +2,9 @@
 /node_modules
 
 # Generated files
-__pycache__
+__pycache__/
+*.py[cod]
+deck_inputs/extra_audio/
 
 # Misc
 .DS_Store

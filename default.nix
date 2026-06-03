@@ -166,25 +166,41 @@ let
       let
         rel = relPath path;
         base = baseNameOf path;
-        isUnder = dir: rel == dir || pkgs.lib.hasPrefix (dir + "/") rel;
-        excludedDirs = [
+        pathSegments = pkgs.lib.splitString "/" rel;
+        isUnderRootDir = dir: rel == dir || pkgs.lib.hasPrefix (dir + "/") rel;
+        hasPathSegment = segment: builtins.elem segment pathSegments;
+        excludedRootDirs = [
           ".agents"
+          ".backup"
           ".codex"
+          ".config"
           ".git"
           ".npm-cache"
           ".yarn-cache"
+          "build_reports"
+          "ci-artifacts"
+          "deck_inputs/extra_audio"
+          "master_db_output"
           "node_modules"
+          "result"
         ];
-        isMasterDbGenerated = pkgs.lib.hasPrefix "master_db_output/" rel;
+        excludedDirNames = [
+          ".pytest-cache"
+          ".pytest_cache"
+          "__pycache__"
+        ];
         isGeneratedFile =
           base == ".DS_Store"
-          || rel == "result"
+          || base == ".backup"
+          || base == ".config"
+          || base == ".env.local"
+          || pkgs.lib.hasPrefix ".env." base
           || pkgs.lib.hasSuffix ".apkg" base
           || pkgs.lib.hasSuffix "_report.json" base
           || pkgs.lib.hasSuffix "_comparison.json" base;
       in
-        !(pkgs.lib.any isUnder excludedDirs)
-        && !isMasterDbGenerated
+        !(pkgs.lib.any isUnderRootDir excludedRootDirs)
+        && !(pkgs.lib.any hasPathSegment excludedDirNames)
         && !(type != "directory" && isGeneratedFile);
   };
 
@@ -341,7 +357,7 @@ PY
 
       # Nix source paths use normalized mtimes that can predate ZIP's 1980
       # lower bound. Use the generator's fixed ZIP timestamp for all media
-      # files materialized in this transitional store build.
+      # files materialized in this store build.
       find . -type f -exec touch -t 202605200639.48 {} +
 
       python tooling/build/generate_hanzi_deck.py \

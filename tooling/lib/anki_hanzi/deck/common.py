@@ -393,7 +393,7 @@ def inject_hanzi_data_bundle(template: str, bundle_path: Path) -> str:
     """Inject hanzi-writer-data JS bundle directly into the template as inline script."""
     if not bundle_path.exists():
         return template
-    
+
     bundle = bundle_path.read_text(encoding="utf-8")
     # Find a good insertion point - after the hanzi-writer bundle script
     marker = "</script>"
@@ -404,13 +404,13 @@ def inject_hanzi_data_bundle(template: str, bundle_path: Path) -> str:
         if pos < 0:
             break
         pos += len(marker)
-    
+
     if pos < 0:
         # Fallback: insert before </body> or at the end
         pos = template.find("</body>")
         if pos < 0:
             pos = len(template)
-    
+
     inline_script = f"\n<script>\n{bundle}\n</script>\n"
     return template[:pos] + inline_script + template[pos:]
 
