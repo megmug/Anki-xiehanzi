@@ -30,5 +30,6 @@ These programs are run manually for maintenance, analysis, or upgrades.
 
 These modules are imported by build programs and are not direct entry points.
 
-- `lib/deck_build_common.py`: shared template, media, model, and stable-id helpers.
-- `lib/meaning_html.py`: render hanzi-style Meaning HTML from structured word and form data.
+- `lib/anki_hanzi/deck/common.py`: shared template, media, model, config, and stable-id helpers.
+- `lib/anki_hanzi/rendering/meaning_html.py`: render hanzi-style Meaning HTML from structured word and form data.
+- `lib/anki_hanzi/audio/`: provider-neutral audio generation plus Kokoro and edge-tts backends.

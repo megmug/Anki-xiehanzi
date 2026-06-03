@@ -39,23 +39,6 @@ DEFAULT_CONFIG_PATH = DECK_INPUTS_DIR / "deck_config.json"
 TAG_NAMESPACE = "hanzi"
 
 
-# Hardcoded voice pools — not configurable per deck to keep builds predictable
-KOKORO_FEMALE_VOICES = ("zf_xiaoxiao", "zf_xiaoni", "zf_xiaobei", "zf_xiaoyi")
-KOKORO_MALE_VOICES = ("zm_yunjian", "zm_yunxi", "zm_yunxia", "zm_yunyang")
-# edge-tts: only voices verified to actually return audio (many zh-CN voices fail)
-EDGE_TTS_FEMALE_VOICES = (
-    "zh-CN-XiaoxiaoNeural",
-    "zh-CN-XiaoyiNeural",
-)
-EDGE_TTS_MALE_VOICES = (
-    "zh-CN-YunjianNeural",
-    "zh-CN-YunxiNeural",
-    "zh-CN-YunxiaNeural",
-)
-AUDIO_FILENAME_FEMALE = "cmn-{simplified}_f.mp3"
-AUDIO_FILENAME_MALE = "cmn-{simplified}_m.mp3"
-
-
 @dataclass(frozen=True)
 class AudioConfig:
     engine: str = "off"  # "kokoro", "edge_tts", or "off"
@@ -129,12 +112,6 @@ class DeckConfig:
     mode: str = ""
     tags: tuple[str, ...] = ()
     individual_simplified: frozenset[str] = frozenset()
-
-    def audio_filenames(self, simplified: str) -> tuple[str, str]:
-        return (
-            AUDIO_FILENAME_FEMALE.format(simplified=simplified),
-            AUDIO_FILENAME_MALE.format(simplified=simplified),
-        )
 
     def template_files(self, card_type: str) -> tuple[Path, Path]:
         mapping = {
