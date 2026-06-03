@@ -33,9 +33,7 @@ def parse_zip_datetime(value: str) -> tuple[int, int, int, int, int, int]:
         year, month, day = (int(part) for part in date_part.split("-"))
         hour, minute, second = (int(part) for part in time_part.split(":"))
     except Exception as exc:
-        raise argparse.ArgumentTypeError(
-            "Expected datetime in YYYY-MM-DDTHH:MM:SS format"
-        ) from exc
+        raise argparse.ArgumentTypeError("Expected datetime in YYYY-MM-DDTHH:MM:SS format") from exc
     return year, month, day, hour, minute, second
 
 
@@ -48,7 +46,9 @@ def parse_args() -> argparse.Namespace:
         help="Snapshot manifest with the pinned CC-CEDICT source filename, SHA256, and source URL.",
     )
     parser.add_argument("--source-file", type=Path, default=None, help="Optional pinned CC-CEDICT text file override.")
-    parser.add_argument("--master-db-output", type=Path, default=DEFAULT_MASTER_DB, help="Diagnostic master JSON output.")
+    parser.add_argument(
+        "--master-db-output", type=Path, default=DEFAULT_MASTER_DB, help="Diagnostic master JSON output."
+    )
     parser.add_argument(
         "--enriched-db-output",
         type=Path,
@@ -61,8 +61,15 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_ENRICHMENT_REPORT,
         help="Diagnostic enrichment report JSON output.",
     )
-    parser.add_argument("--hsk-data-dir", type=Path, default=DEFAULT_HSK_DATA_DIR, help="Prepared hanzi HSK TSV directory.")
-    parser.add_argument("--frequency-list", type=Path, default=DEFAULT_FREQUENCY_LIST, help="Simplified word frequency list sorted by usage.")
+    parser.add_argument(
+        "--hsk-data-dir", type=Path, default=DEFAULT_HSK_DATA_DIR, help="Prepared hanzi HSK TSV directory."
+    )
+    parser.add_argument(
+        "--frequency-list",
+        type=Path,
+        default=DEFAULT_FREQUENCY_LIST,
+        help="Simplified word frequency list sorted by usage.",
+    )
     parser.add_argument("--config", type=Path, default=DEFAULT_DECK_CONFIG, help="Deck selection JSON config.")
     parser.add_argument("--output", type=Path, default=None, help="Output APKG path.")
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH, help="Output report JSON path.")
@@ -117,11 +124,7 @@ def main() -> int:
         deterministic_zip=args.deterministic_zip,
         zip_generated_datetime=args.zip_generated_datetime,
     )
-    console_report = {
-        key: value
-        for key, value in report.items()
-        if key != "dropped_duplicates"
-    }
+    console_report = {key: value for key, value in report.items() if key != "dropped_duplicates"}
     print(json.dumps(console_report, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 

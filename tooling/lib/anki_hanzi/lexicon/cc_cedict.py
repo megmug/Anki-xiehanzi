@@ -102,11 +102,7 @@ def load_snapshot_manifest(path: Path) -> dict[str, Any]:
         raise FileNotFoundError(f"missing snapshot manifest: {path}")
 
     manifest = json.loads(path.read_text(encoding="utf-8"))
-    missing_fields = [
-        field
-        for field in ["source_filename", "sha256", "source_url"]
-        if not manifest.get(field)
-    ]
+    missing_fields = [field for field in ["source_filename", "sha256", "source_url"] if not manifest.get(field)]
     if missing_fields:
         raise ValueError(f"snapshot manifest is missing required fields: {', '.join(missing_fields)}")
     return manifest

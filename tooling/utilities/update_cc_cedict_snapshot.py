@@ -57,7 +57,9 @@ def read_snapshot_text(zip_path: Path) -> tuple[bytes, dict[str, str], dict[str,
     return raw, header, member
 
 
-def build_manifest(source_text: bytes, header: dict[str, str], member: dict[str, Any], source_url: str) -> dict[str, Any]:
+def build_manifest(
+    source_text: bytes, header: dict[str, str], member: dict[str, Any], source_url: str
+) -> dict[str, Any]:
     return {
         "schema": "hanzi-cc-cedict-snapshot-v2",
         "source_url": source_url,

@@ -23,6 +23,12 @@ These programs are run manually for maintenance, analysis, or upgrades.
   A filename `migrate-<old-hash>.py` migrates from that old build hash to the target APKG it is released with.
 - `utilities/update_cc_cedict_snapshot.py`: refresh the pinned CC-CEDICT snapshot when an intentional source-data update is needed.
 
+## Formatting
+
+Run `nix-shell --run "treefmt"` to format maintained Python and Nix code.
+Treefmt uses Ruff for Python and nixfmt for Nix.
+Generated migration scripts and vendored deck inputs are excluded.
+
 ## Library
 
 These modules are imported by build programs and are not direct entry points.

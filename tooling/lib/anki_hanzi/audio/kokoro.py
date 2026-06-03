@@ -16,10 +16,7 @@ KOKORO_VOICES = (
 
 def _is_audio_input_error(exc: Exception) -> bool:
     message = str(exc)
-    return (
-        "normal_pinyin" in message
-        or "Final couldn't be detected" in message
-    )
+    return "normal_pinyin" in message or "Final couldn't be detected" in message
 
 
 def _torch_cuda_available() -> bool:
@@ -42,8 +39,7 @@ def _create_kokoro_pipeline(KPipeline: type, device: str) -> Any:
     except (TypeError, ValueError):
         parameters = {}
     supports_device = "device" in parameters or any(
-        parameter.kind == inspect.Parameter.VAR_KEYWORD
-        for parameter in parameters.values()
+        parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
     )
     if supports_device:
         kwargs["device"] = device

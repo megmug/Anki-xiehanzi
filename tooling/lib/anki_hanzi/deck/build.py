@@ -63,10 +63,7 @@ class EnrichedWordEntry:
     def audio_ref(self) -> str:
         if not self.audio_filename_primary and not self.audio_filename_secondary:
             return ""
-        return (
-            f"[sound:{self.audio_filename_primary}]"
-            f"[sound:{self.audio_filename_secondary}]"
-        )
+        return f"[sound:{self.audio_filename_primary}][sound:{self.audio_filename_secondary}]"
 
     @property
     def audio_filenames(self) -> tuple[str, str]:
@@ -120,11 +117,7 @@ def parse_simplified_list(value: Any, field_name: str) -> frozenset[str]:
         return frozenset()
     if not isinstance(value, list):
         raise ValueError(f"deck config selection.{field_name} must be a list")
-    return frozenset(
-        simplified
-        for simplified in (normalize_simplified(item) for item in value)
-        if simplified
-    )
+    return frozenset(simplified for simplified in (normalize_simplified(item) for item in value) if simplified)
 
 
 def load_deck_selection(config_path: Path | None) -> DeckSelection:
@@ -160,11 +153,7 @@ def load_deck_selection(config_path: Path | None) -> DeckSelection:
 
 def _is_hanzi_char(char: str) -> bool:
     code = ord(char)
-    return (
-        (0x4E00 <= code <= 0x9FFF)
-        or (0x3400 <= code <= 0x4DBF)
-        or (0x20000 <= code <= 0x2EBEF)
-    )
+    return (0x4E00 <= code <= 0x9FFF) or (0x3400 <= code <= 0x4DBF) or (0x20000 <= code <= 0x2EBEF)
 
 
 def _has_hanzi_writer_data(char: str) -> bool:
@@ -302,12 +291,13 @@ def _selected_reading_groups(
         for form in group_forms:
             group_tags.update(_effective_form_tags(word, form))
 
-        reading_groups.append(ReadingGroup(
-            display_pinyin=selected_display_by_key.get(normalized_pinyin)
-            or display_by_key[normalized_pinyin],
-            forms=tuple(group_forms),
-            tags=frozenset(group_tags),
-        ))
+        reading_groups.append(
+            ReadingGroup(
+                display_pinyin=selected_display_by_key.get(normalized_pinyin) or display_by_key[normalized_pinyin],
+                forms=tuple(group_forms),
+                tags=frozenset(group_tags),
+            )
+        )
     return reading_groups
 
 
@@ -459,14 +449,9 @@ def build_entries_from_state(
 
     selection_report = {
         **selection.report(),
-        "entries_by_card_type": {
-            card_type: len(entries)
-            for card_type, entries in entries_by_card_type.items()
-        },
+        "entries_by_card_type": {card_type: len(entries) for card_type, entries in entries_by_card_type.items()},
         "matched_individual_simplified": sorted(matched_individual_simplified),
-        "unmatched_individual_simplified": sorted(
-            selection.individual_simplified - matched_individual_simplified
-        ),
+        "unmatched_individual_simplified": sorted(selection.individual_simplified - matched_individual_simplified),
         "meaning_html": {
             "rendered_from_data": rendered_meaning_html_used,
         },
@@ -642,10 +627,7 @@ def build_package(
     audio_result = audio_generator.generate(audio_jobs)
 
     # Build hanzi-writer JS bundle for offline Write deck usage
-    write_entries = [
-        e for e in entries_by_card_type.get("Write", [])
-        if _is_writable_hanzi(e.simplified)
-    ]
+    write_entries = [e for e in entries_by_card_type.get("Write", []) if _is_writable_hanzi(e.simplified)]
     hw_bundle_path = Path(common.EXTRA_AUDIO_DIR) / "hanzi-writer-data.js"
     hw_bundle_path.parent.mkdir(parents=True, exist_ok=True)
     build_hanzi_writer_bundle(write_entries, hw_bundle_path)
@@ -665,11 +647,7 @@ def build_package(
     )
 
     total_cards = sum(len(d.notes) for d in decks)
-    unique_words = {
-        entry.simplified.strip()
-        for entry in all_entries
-        if entry.simplified.strip()
-    }
+    unique_words = {entry.simplified.strip() for entry in all_entries if entry.simplified.strip()}
     report = {
         "output": str(output_apkg),
         "report": str(report_path),
@@ -684,10 +662,7 @@ def build_package(
         "card_settings": config.card_settings,
         "dedupe_key": HANZI_DEDUPE_KEY,
         "total_words": len(unique_words),
-        "entries_by_card_type": {
-            card_type: len(entries)
-            for card_type, entries in entries_by_card_type.items()
-        },
+        "entries_by_card_type": {card_type: len(entries) for card_type, entries in entries_by_card_type.items()},
         "total_cards": total_cards,
         "decks": len(decks),
         "audio_files_packaged": len(media_files) - len(static_media),

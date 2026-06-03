@@ -100,10 +100,7 @@ class AudioGenerator:
     def filenames_for_text(self, text: str) -> tuple[str, str]:
         if not self.enabled:
             return ("", "")
-        filenames = [
-            AUDIO_FILENAME_TEMPLATES[voice.slot].format(text=text)
-            for voice in self.backend.voices
-        ]
+        filenames = [AUDIO_FILENAME_TEMPLATES[voice.slot].format(text=text) for voice in self.backend.voices]
         return tuple(filenames)  # type: ignore[return-value]
 
     def audio_ref_for_text(self, text: str) -> str:
@@ -123,11 +120,13 @@ class AudioGenerator:
             seen.add(clean_text)
             filenames = self.filenames_for_text(clean_text)
             for voice, filename in zip(self.backend.voices, filenames, strict=True):
-                jobs.append(AudioJob(
-                    text=clean_text,
-                    output_path=self.audio_dir / filename,
-                    voice=voice,
-                ))
+                jobs.append(
+                    AudioJob(
+                        text=clean_text,
+                        output_path=self.audio_dir / filename,
+                        voice=voice,
+                    )
+                )
         return jobs
 
     def voice_report(self) -> dict[str, dict[str, str]]:
@@ -145,23 +144,21 @@ class AudioGenerator:
             print("  Audio generation disabled (engine: off)")
             return AudioGenerationResult([], [], removed, [])
 
-        exceptions = (
-            load_audio_generation_exceptions(self.exceptions_path)
-            if self.exceptions_path is not None
-            else {}
-        )
+        exceptions = load_audio_generation_exceptions(self.exceptions_path) if self.exceptions_path is not None else {}
 
         try:
             self.backend.setup()
         except Exception:
             return AudioGenerationResult(
                 generated=[],
-                failed=[AudioFailure(
-                    word="",
-                    slot="",
-                    voice="",
-                    error=f"Failed to load {self.backend.engine} audio backend:\n{traceback.format_exc()}",
-                )],
+                failed=[
+                    AudioFailure(
+                        word="",
+                        slot="",
+                        voice="",
+                        error=f"Failed to load {self.backend.engine} audio backend:\n{traceback.format_exc()}",
+                    )
+                ],
                 removed_zero_length=removed,
                 skipped=[],
             )
@@ -194,12 +191,14 @@ class AudioGenerator:
                     f"voice={job.voice.provider_id!r}: {exception_reason}",
                     flush=True,
                 )
-                skipped.append(AudioSkip(
-                    word=job.text,
-                    slot=job.voice.slot,
-                    voice=job.voice.provider_id,
-                    reason=exception_reason,
-                ))
+                skipped.append(
+                    AudioSkip(
+                        word=job.text,
+                        slot=job.voice.slot,
+                        voice=job.voice.provider_id,
+                        reason=exception_reason,
+                    )
+                )
                 mark_word_seen(job.text)
                 continue
 
@@ -214,12 +213,14 @@ class AudioGenerator:
                     f"voice={job.voice.provider_id!r}: {exc}",
                     flush=True,
                 )
-                failed.append(AudioFailure(
-                    word=job.text,
-                    slot=job.voice.slot,
-                    voice=job.voice.provider_id,
-                    error=str(exc),
-                ))
+                failed.append(
+                    AudioFailure(
+                        word=job.text,
+                        slot=job.voice.slot,
+                        voice=job.voice.provider_id,
+                        error=str(exc),
+                    )
+                )
 
             mark_word_seen(job.text)
 

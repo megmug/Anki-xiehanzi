@@ -240,16 +240,10 @@ class LexiconWord:
             ),
             hanzi_frequency=(
                 int(data["hanzi"]["frequency"])
-                if (
-                    isinstance(data.get("hanzi"), dict)
-                    and data["hanzi"].get("frequency") is not None
-                )
+                if (isinstance(data.get("hanzi"), dict) and data["hanzi"].get("frequency") is not None)
                 else None
             ),
-            has_hanzi_frequency=(
-                isinstance(data.get("hanzi"), dict)
-                and "frequency" in data["hanzi"]
-            ),
+            has_hanzi_frequency=(isinstance(data.get("hanzi"), dict) and "frequency" in data["hanzi"]),
         )
         for form_data in data.get("forms", []):
             word.add_form(LexiconForm.from_master_json(form_data))
@@ -327,10 +321,7 @@ class LexiconState:
     def from_master_json(cls, data: dict[str, Any]) -> "LexiconState":
         words = {
             word.simplified: word
-            for word in (
-                LexiconWord.from_master_json(word_data)
-                for word_data in data.get("words", [])
-            )
+            for word in (LexiconWord.from_master_json(word_data) for word_data in data.get("words", []))
         }
         return cls(
             schema=str(data.get("schema") or "hanzi-master-lexicon-cc-cedict-v2"),

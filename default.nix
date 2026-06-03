@@ -1,41 +1,54 @@
-{ system ? builtins.currentSystem
-, cudaTorchVersion ? "2.12.0"
-, cudaTorchIndexUrl ? "https://download.pytorch.org/whl/cu130"
-, buildId ? null
-, pkgs ? import ( builtins.fetchGit {
+{
+  system ? builtins.currentSystem,
+  cudaTorchVersion ? "2.12.0",
+  cudaTorchIndexUrl ? "https://download.pytorch.org/whl/cu130",
+  buildId ? null,
+  pkgs ? import (builtins.fetchGit {
     url = "https://github.com/nixos/nixpkgs/";
     ref = "nixos-26.05";
     rev = "b51242d7d43689db2f3be91bd05d5b24fbb469c4";
-} ) {
-  inherit system;
-}
+  }) { inherit system; },
 }:
 
 let
   gitHeadPath = ./.git/HEAD;
-  gitHead = if builtins.pathExists gitHeadPath then pkgs.lib.trim (builtins.readFile gitHeadPath) else "";
-  gitHeadRef = if pkgs.lib.hasPrefix "ref: " gitHead then pkgs.lib.removePrefix "ref: " gitHead else "";
+  gitHead =
+    if builtins.pathExists gitHeadPath then pkgs.lib.trim (builtins.readFile gitHeadPath) else "";
+  gitHeadRef =
+    if pkgs.lib.hasPrefix "ref: " gitHead then pkgs.lib.removePrefix "ref: " gitHead else "";
   gitHeadRefPath = ./.git + "/${gitHeadRef}";
   gitCommit =
-    if buildId != null then buildId
-    else if gitHeadRef != "" && builtins.pathExists gitHeadRefPath then pkgs.lib.trim (builtins.readFile gitHeadRefPath)
-    else if gitHead != "" && !(pkgs.lib.hasPrefix "ref: " gitHead) then gitHead
-    else "unknown";
+    if buildId != null then
+      buildId
+    else if gitHeadRef != "" && builtins.pathExists gitHeadRefPath then
+      pkgs.lib.trim (builtins.readFile gitHeadRefPath)
+    else if gitHead != "" && !(pkgs.lib.hasPrefix "ref: " gitHead) then
+      gitHead
+    else
+      "unknown";
   resolvedBuildId = if gitCommit == "unknown" then "unknown" else builtins.substring 0 7 gitCommit;
   deckConfigPath = ./deck_inputs/deck_config.json;
-  deckConfig = if builtins.pathExists deckConfigPath then builtins.fromJSON (builtins.readFile deckConfigPath) else {};
-  deckAudioConfig = deckConfig.audio or {};
+  deckConfig =
+    if builtins.pathExists deckConfigPath then
+      builtins.fromJSON (builtins.readFile deckConfigPath)
+    else
+      { };
+  deckAudioConfig = deckConfig.audio or { };
   deckAudioEngine =
-    if builtins.isAttrs deckAudioConfig
-    then deckAudioConfig.engine or "off"
-    else "off";
-  rawNormalizedDeckAudioEngine =
-    pkgs.lib.toLower (pkgs.lib.replaceStrings ["-"] ["_"] (toString deckAudioEngine));
-  supportedAudioEngines = [ "off" "kokoro" "edge_tts" ];
+    if builtins.isAttrs deckAudioConfig then deckAudioConfig.engine or "off" else "off";
+  rawNormalizedDeckAudioEngine = pkgs.lib.toLower (
+    pkgs.lib.replaceStrings [ "-" ] [ "_" ] (toString deckAudioEngine)
+  );
+  supportedAudioEngines = [
+    "off"
+    "kokoro"
+    "edge_tts"
+  ];
   normalizedDeckAudioEngine =
-    if builtins.elem rawNormalizedDeckAudioEngine supportedAudioEngines
-    then rawNormalizedDeckAudioEngine
-    else builtins.throw "deck_inputs/deck_config.json audio.engine must be one of: off, kokoro, edge_tts";
+    if builtins.elem rawNormalizedDeckAudioEngine supportedAudioEngines then
+      rawNormalizedDeckAudioEngine
+    else
+      builtins.throw "deck_inputs/deck_config.json audio.engine must be one of: off, kokoro, edge_tts";
   needsKokoroAudio = normalizedDeckAudioEngine == "kokoro";
   needsEdgeTtsAudio = normalizedDeckAudioEngine == "edge_tts";
   needsAudioBuild = needsKokoroAudio || needsEdgeTtsAudio;
@@ -43,9 +56,10 @@ let
 
   enableCudaPip = needsKokoroAudio && pkgs.stdenv.isLinux;
   kokoroAudioSupported =
-    if needsKokoroAudio && pkgs.stdenv.isDarwin
-    then builtins.throw "audio.engine=kokoro is not supported by this Nix build on Darwin because nixpkgs kokoro depends on Darwin-broken dlinfo via phonemizer. Use audio.engine=off or edge_tts on macOS."
-    else true;
+    if needsKokoroAudio && pkgs.stdenv.isDarwin then
+      builtins.throw "audio.engine=kokoro is not supported by this Nix build on Darwin because nixpkgs kokoro depends on Darwin-broken dlinfo via phonemizer. Use audio.engine=off or edge_tts on macOS."
+    else
+      true;
 
   pythonBase = pkgs.python313;
   pythonPackages = pythonBase.pkgs;
@@ -126,26 +140,37 @@ let
     doCheck = false;
   };
 
-  pythonEnv = assert kokoroAudioSupported; pythonBase.withPackages (ps: with ps; [
-    colorize-pinyin
-    pinyin-tone-converter
-    cn2an
-    dragonmapper
-    genanki
-    pip
-    setuptools
-    wheel
-  ] ++ pkgs.lib.optionals needsEdgeTtsAudio [
-    edge-tts
-  ] ++ pkgs.lib.optionals needsKokoroAudio ([
-    # Core deps already present in nixpkgs that Kokoro reuses
-    torch
-    numpy
-    scipy
-    soundfile
-    kokoro
-    pypinyin-dict
-  ] ++ misaki.optional-dependencies.zh));
+  pythonEnv =
+    assert kokoroAudioSupported;
+    pythonBase.withPackages (
+      ps:
+      with ps;
+      [
+        colorize-pinyin
+        pinyin-tone-converter
+        cn2an
+        dragonmapper
+        genanki
+        pip
+        setuptools
+        wheel
+      ]
+      ++ pkgs.lib.optionals needsEdgeTtsAudio [
+        edge-tts
+      ]
+      ++ pkgs.lib.optionals needsKokoroAudio (
+        [
+          # Core deps already present in nixpkgs that Kokoro reuses
+          torch
+          numpy
+          scipy
+          soundfile
+          kokoro
+          pypinyin-dict
+        ]
+        ++ misaki.optional-dependencies.zh
+      )
+    );
 
   yarnOfflineCache = pkgs.fetchYarnDeps {
     yarnLock = ./yarn.lock;
@@ -153,16 +178,18 @@ let
   };
 
   root = toString ./.;
-  relPath = path:
+  relPath =
+    path:
     let
       pathString = toString path;
     in
-      if pathString == root then "" else pkgs.lib.removePrefix (root + "/") pathString;
+    if pathString == root then "" else pkgs.lib.removePrefix (root + "/") pathString;
 
   localBuildSource = pkgs.lib.cleanSourceWith {
     name = "anki-hanzi-local-build-source";
     src = ./.;
-    filter = path: type:
+    filter =
+      path: type:
       let
         rel = relPath path;
         base = baseNameOf path;
@@ -199,9 +226,9 @@ let
           || pkgs.lib.hasSuffix "_report.json" base
           || pkgs.lib.hasSuffix "_comparison.json" base;
       in
-        !(pkgs.lib.any isUnderRootDir excludedRootDirs)
-        && !(pkgs.lib.any hasPathSegment excludedDirNames)
-        && !(type != "directory" && isGeneratedFile);
+      !(pkgs.lib.any isUnderRootDir excludedRootDirs)
+      && !(pkgs.lib.any hasPathSegment excludedDirNames)
+      && !(type != "directory" && isGeneratedFile);
   };
 
   hanzi-apkg = pkgs.stdenvNoCC.mkDerivation {
@@ -218,6 +245,9 @@ let
       gnumake
       espeak-ng
       ffmpeg
+      nixfmt
+      ruff
+      treefmt
     ];
 
     # Allow network access during audio builds so Kokoro can download
@@ -236,135 +266,135 @@ let
     '';
 
     buildPhase = ''
-      runHook preBuild
+            runHook preBuild
 
-      export HOME="$TMPDIR/home"
-      mkdir -p "$HOME"
+            export HOME="$TMPDIR/home"
+            mkdir -p "$HOME"
 
-      # huggingface_hub/httpx needs CA certs for HTTPS downloads
-      export SSL_CERT_FILE="${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-      export REQUESTS_CA_BUNDLE="$SSL_CERT_FILE"
-      export ANKI_HANZI_BUILD_ID="${resolvedBuildId}"
-      AUDIO_ENGINE="${normalizedDeckAudioEngine}"
-      echo "=== deck audio engine: $AUDIO_ENGINE ==="
-      echo "=== pip CUDA PyTorch: ${if enableCudaPip then "auto/probe" else "disabled"} ==="
+            # huggingface_hub/httpx needs CA certs for HTTPS downloads
+            export SSL_CERT_FILE="${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+            export REQUESTS_CA_BUNDLE="$SSL_CERT_FILE"
+            export ANKI_HANZI_BUILD_ID="${resolvedBuildId}"
+            AUDIO_ENGINE="${normalizedDeckAudioEngine}"
+            echo "=== deck audio engine: $AUDIO_ENGINE ==="
+            echo "=== pip CUDA PyTorch: ${if enableCudaPip then "auto/probe" else "disabled"} ==="
 
-      # Isolate the optional CUDA PyTorch wheel so it does not clash with Nix python.
-      PYTHON_VERSION=$(python --version 2>&1 | cut -d' ' -f2 | cut -d'.' -f1,2)
-      CUDA_PIP_PREFIX="$TMPDIR/cuda-pip"
-      SITE_PACKAGES="$CUDA_PIP_PREFIX/lib/python''${PYTHON_VERSION}/site-packages"
-      export PYTHONPATH="$SITE_PACKAGES:$PYTHONPATH"
-      export PATH="$CUDA_PIP_PREFIX/bin:$PATH"
-      export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-      mkdir -p "$CUDA_PIP_PREFIX"
-
-      ${pkgs.lib.optionalString enableCudaPip ''
-      CUDA_DRIVER_LIB_DIR="$TMPDIR/nvidia-driver-libs"
-      mkdir -p "$CUDA_DRIVER_LIB_DIR"
-      CUDA_DRIVER_FOUND=0
-      for driver_lib in \
-        /run/opengl-driver/lib \
-        /usr/lib/x86_64-linux-gnu \
-        /usr/lib64 \
-        /usr/lib/wsl/lib; do
-        if [ -d "$driver_lib" ]; then
-          while IFS= read -r lib; do
-            resolved="$(readlink -f "$lib" || true)"
-            if [ -n "$resolved" ]; then
-              ln -sf "$resolved" "$CUDA_DRIVER_LIB_DIR/$(basename "$lib")"
-            fi
-          done < <(find "$driver_lib" -maxdepth 1 \( -type f -o -type l \) \( \
-            -name 'libcuda.so*' -o \
-            -name 'libnvidia-*.so*' \
-          \))
-        fi
-      done
-
-      if find "$CUDA_DRIVER_LIB_DIR" -maxdepth 1 -name 'libcuda.so*' -print -quit | grep -q .; then
-        CUDA_DRIVER_FOUND=1
-      elif command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
-        CUDA_DRIVER_FOUND=1
-      fi
-
-      if [ "$CUDA_DRIVER_FOUND" != "1" ]; then
-        echo "=== No NVIDIA CUDA driver detected; using Nix CPU PyTorch ==="
-      else
-        echo "=== Installing CUDA-enabled PyTorch wheel into isolated pip prefix ==="
-        if ! pip install --prefix "$CUDA_PIP_PREFIX" --no-cache-dir \
-          --ignore-installed --force-reinstall \
-          --index-url "${cudaTorchIndexUrl}" \
-          "torch==${cudaTorchVersion}"; then
-          echo "WARNING: CUDA PyTorch wheel installation failed; falling back to Nix CPU PyTorch"
-          rm -rf "$CUDA_PIP_PREFIX"
-          mkdir -p "$CUDA_PIP_PREFIX"
-        else
-          export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib:$CUDA_DRIVER_LIB_DIR''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-          if ! python - <<'PY'; then
-import ctypes.util
-import sys
-import torch
-
-print(
-    "=== PyTorch",
-    torch.__version__,
-    "from",
-    torch.__file__,
-    "CUDA",
-    torch.version.cuda,
-    "available",
-    torch.cuda.is_available(),
-    "devices",
-    torch.cuda.device_count(),
-    "libcuda",
-    ctypes.util.find_library("cuda"),
-    "===",
-)
-if not torch.cuda.is_available() or torch.cuda.device_count() < 1:
-    sys.exit(1)
-PY
-            echo "WARNING: CUDA PyTorch import/probe failed; falling back to Nix CPU PyTorch"
-            rm -rf "$CUDA_PIP_PREFIX"
+            # Isolate the optional CUDA PyTorch wheel so it does not clash with Nix python.
+            PYTHON_VERSION=$(python --version 2>&1 | cut -d' ' -f2 | cut -d'.' -f1,2)
+            CUDA_PIP_PREFIX="$TMPDIR/cuda-pip"
+            SITE_PACKAGES="$CUDA_PIP_PREFIX/lib/python''${PYTHON_VERSION}/site-packages"
+            export PYTHONPATH="$SITE_PACKAGES:$PYTHONPATH"
+            export PATH="$CUDA_PIP_PREFIX/bin:$PATH"
+            export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             mkdir -p "$CUDA_PIP_PREFIX"
-            export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib"
-          fi
-        fi
-      fi
-      ''}
 
-      # Audio dependencies are included in the Nix python env only for the
-      # configured audio engine.
-      if [ "$AUDIO_ENGINE" = "kokoro" ]; then
-        if ! python -c "import kokoro" 2>/dev/null; then
-          echo "ERROR: Kokoro import failed in Nix python environment"
-          exit 1
-        fi
-        if ! python - <<'PY' 2>/dev/null; then
-from kokoro import KPipeline
-KPipeline(lang_code="z")
-PY
-          echo "ERROR: Kokoro Chinese pipeline failed in Nix python environment"
-          exit 1
-        fi
-        echo "=== Kokoro Chinese pipeline available ==="
-      fi
-      if [ "$AUDIO_ENGINE" = "edge_tts" ]; then
-        if ! python -c "import edge_tts" 2>/dev/null; then
-          echo "ERROR: edge-tts import failed in Nix python environment"
-          exit 1
-        fi
-        echo "=== edge-tts available ==="
-      fi
+            ${pkgs.lib.optionalString enableCudaPip ''
+                    CUDA_DRIVER_LIB_DIR="$TMPDIR/nvidia-driver-libs"
+                    mkdir -p "$CUDA_DRIVER_LIB_DIR"
+                    CUDA_DRIVER_FOUND=0
+                    for driver_lib in \
+                      /run/opengl-driver/lib \
+                      /usr/lib/x86_64-linux-gnu \
+                      /usr/lib64 \
+                      /usr/lib/wsl/lib; do
+                      if [ -d "$driver_lib" ]; then
+                        while IFS= read -r lib; do
+                          resolved="$(readlink -f "$lib" || true)"
+                          if [ -n "$resolved" ]; then
+                            ln -sf "$resolved" "$CUDA_DRIVER_LIB_DIR/$(basename "$lib")"
+                          fi
+                        done < <(find "$driver_lib" -maxdepth 1 \( -type f -o -type l \) \( \
+                          -name 'libcuda.so*' -o \
+                          -name 'libnvidia-*.so*' \
+                        \))
+                      fi
+                    done
 
-      # Nix source paths use normalized mtimes that can predate ZIP's 1980
-      # lower bound. Use the generator's fixed ZIP timestamp for all media
-      # files materialized in this store build.
-      find . -type f -exec touch -t 202605200639.48 {} +
+                    if find "$CUDA_DRIVER_LIB_DIR" -maxdepth 1 -name 'libcuda.so*' -print -quit | grep -q .; then
+                      CUDA_DRIVER_FOUND=1
+                    elif command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+                      CUDA_DRIVER_FOUND=1
+                    fi
 
-      python tooling/build/generate_hanzi_deck.py \
-        --timestamp 1779251987.6 \
-        --zip-generated-datetime 2026-05-20T06:39:48
+                    if [ "$CUDA_DRIVER_FOUND" != "1" ]; then
+                      echo "=== No NVIDIA CUDA driver detected; using Nix CPU PyTorch ==="
+                    else
+                      echo "=== Installing CUDA-enabled PyTorch wheel into isolated pip prefix ==="
+                      if ! pip install --prefix "$CUDA_PIP_PREFIX" --no-cache-dir \
+                        --ignore-installed --force-reinstall \
+                        --index-url "${cudaTorchIndexUrl}" \
+                        "torch==${cudaTorchVersion}"; then
+                        echo "WARNING: CUDA PyTorch wheel installation failed; falling back to Nix CPU PyTorch"
+                        rm -rf "$CUDA_PIP_PREFIX"
+                        mkdir -p "$CUDA_PIP_PREFIX"
+                      else
+                        export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib:$CUDA_DRIVER_LIB_DIR''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+                        if ! python - <<'PY'; then
+              import ctypes.util
+              import sys
+              import torch
 
-      runHook postBuild
+              print(
+                  "=== PyTorch",
+                  torch.__version__,
+                  "from",
+                  torch.__file__,
+                  "CUDA",
+                  torch.version.cuda,
+                  "available",
+                  torch.cuda.is_available(),
+                  "devices",
+                  torch.cuda.device_count(),
+                  "libcuda",
+                  ctypes.util.find_library("cuda"),
+                  "===",
+              )
+              if not torch.cuda.is_available() or torch.cuda.device_count() < 1:
+                  sys.exit(1)
+              PY
+                          echo "WARNING: CUDA PyTorch import/probe failed; falling back to Nix CPU PyTorch"
+                          rm -rf "$CUDA_PIP_PREFIX"
+                          mkdir -p "$CUDA_PIP_PREFIX"
+                          export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib"
+                        fi
+                      fi
+                    fi
+            ''}
+
+            # Audio dependencies are included in the Nix python env only for the
+            # configured audio engine.
+            if [ "$AUDIO_ENGINE" = "kokoro" ]; then
+              if ! python -c "import kokoro" 2>/dev/null; then
+                echo "ERROR: Kokoro import failed in Nix python environment"
+                exit 1
+              fi
+              if ! python - <<'PY' 2>/dev/null; then
+      from kokoro import KPipeline
+      KPipeline(lang_code="z")
+      PY
+                echo "ERROR: Kokoro Chinese pipeline failed in Nix python environment"
+                exit 1
+              fi
+              echo "=== Kokoro Chinese pipeline available ==="
+            fi
+            if [ "$AUDIO_ENGINE" = "edge_tts" ]; then
+              if ! python -c "import edge_tts" 2>/dev/null; then
+                echo "ERROR: edge-tts import failed in Nix python environment"
+                exit 1
+              fi
+              echo "=== edge-tts available ==="
+            fi
+
+            # Nix source paths use normalized mtimes that can predate ZIP's 1980
+            # lower bound. Use the generator's fixed ZIP timestamp for all media
+            # files materialized in this store build.
+            find . -type f -exec touch -t 202605200639.48 {} +
+
+            python tooling/build/generate_hanzi_deck.py \
+              --timestamp 1779251987.6 \
+              --zip-generated-datetime 2026-05-20T06:39:48
+
+            runHook postBuild
     '';
 
     installPhase = ''
@@ -382,4 +412,4 @@ PY
   };
 in
 
-  hanzi-apkg
+hanzi-apkg

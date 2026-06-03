@@ -161,9 +161,7 @@ def load_deck_config(path: Path | None = None) -> DeckConfig:
     individual_simplified: frozenset[str] = frozenset()
     raw_individual = selection.get("individual_simplified", [])
     if isinstance(raw_individual, list):
-        individual_simplified = frozenset(
-            s for s in (str(item).strip() for item in raw_individual) if s
-        )
+        individual_simplified = frozenset(s for s in (str(item).strip() for item in raw_individual) if s)
 
     tags_raw = selection.get("tags", [])
     if isinstance(tags_raw, str):
@@ -225,10 +223,7 @@ SUPPORTED_AUDIO_ENGINES = {"off", "kokoro", "edge_tts"}
 def normalize_audio_engine(value: Any, field_name: str) -> str:
     engine = str(value or "").strip().casefold().replace("-", "_")
     if engine not in SUPPORTED_AUDIO_ENGINES:
-        raise ValueError(
-            f"deck config {field_name} must be one of: "
-            f"{', '.join(sorted(SUPPORTED_AUDIO_ENGINES))}"
-        )
+        raise ValueError(f"deck config {field_name} must be one of: {', '.join(sorted(SUPPORTED_AUDIO_ENGINES))}")
     return engine
 
 
@@ -296,9 +291,7 @@ def merge_card_settings(
                 raise ValueError(f"deck config card_settings.{card_type}.{side} must be an object")
             for key, value in side_settings.items():
                 if key not in settings[card_type][side]:
-                    raise ValueError(
-                        f"deck config card_settings.{card_type}.{side} has unknown setting: {key}"
-                    )
+                    raise ValueError(f"deck config card_settings.{card_type}.{side} has unknown setting: {key}")
                 field_name = f"card_settings.{card_type}.{side}.{key}"
                 settings[card_type][side][key] = normalize_card_setting(value, field_name)
 
@@ -306,12 +299,10 @@ def merge_card_settings(
 
 
 class NoteEntry(Protocol):
-    def fields(self, card_type: str, build_id: str) -> list[str]:
-        ...
+    def fields(self, card_type: str, build_id: str) -> list[str]: ...
 
     @property
-    def tags(self) -> tuple[str, ...]:
-        ...
+    def tags(self) -> tuple[str, ...]: ...
 
 
 def stable_id(label: str) -> int:
@@ -328,9 +319,7 @@ def normalized_note_pinyin(value: str) -> str:
 
 
 def stable_note_id(card_type: str, simplified: str, pinyin: str) -> str:
-    return stable_hex_id(
-        f"{card_type}\0{str(simplified or '').strip()}\0{normalized_note_pinyin(pinyin)}"
-    )
+    return stable_hex_id(f"{card_type}\0{str(simplified or '').strip()}\0{normalized_note_pinyin(pinyin)}")
 
 
 def stable_note_guid(note_id: str) -> str:
@@ -364,10 +353,12 @@ def read_hanzi_writer_package_version() -> str:
 def read_hanzi_writer_bundle() -> str:
     version = read_hanzi_writer_package_version()
     bundle = HANZI_WRITER_BUNDLE.read_text(encoding="utf-8").strip()
-    return "\n".join([
-        f"/*! Hanzi Writer v{version} injected from npm package */",
-        bundle,
-    ])
+    return "\n".join(
+        [
+            f"/*! Hanzi Writer v{version} injected from npm package */",
+            bundle,
+        ]
+    )
 
 
 def inject_hanzi_writer_bundle(template: str) -> str:
@@ -382,10 +373,7 @@ def inject_hanzi_writer_bundle(template: str) -> str:
         raise ValueError("Could not find embedded Hanzi Writer bundle end marker")
 
     injected_bundle = read_hanzi_writer_bundle()
-    indented_bundle = "\n".join(
-        f"    {line}" if line else ""
-        for line in injected_bundle.splitlines()
-    )
+    indented_bundle = "\n".join(f"    {line}" if line else "" for line in injected_bundle.splitlines())
     return template[:script_start] + indented_bundle + template[script_end:]
 
 

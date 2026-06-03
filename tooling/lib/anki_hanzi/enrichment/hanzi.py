@@ -36,8 +36,7 @@ DEFAULT_REPORT = Path("master_db_output/hanzi_enrichment_report.json")
 DEFAULT_DECK_INPUTS_DIR = Path("deck_inputs")
 DEFAULT_HSK_DATA_DIR = DEFAULT_DECK_INPUTS_DIR / "hsk-3.0-words-list/New HSK (2025)/Anki xiehanzi"
 DEFAULT_FREQUENCY_LIST = (
-    DEFAULT_DECK_INPUTS_DIR
-    / "hsk-3.0-words-list/Scripts and data/blog_lit_news_tech_weibo_freq.release_sorted.txt"
+    DEFAULT_DECK_INPUTS_DIR / "hsk-3.0-words-list/Scripts and data/blog_lit_news_tech_weibo_freq.release_sorted.txt"
 )
 TOP_FREQUENCY_THRESHOLDS = (500, 2500, 10000)
 HANZI_DEDUPE_KEY = "Simplified + normalized Pinyin"
@@ -91,12 +90,7 @@ class PinyinReading:
 
 
 def normalize_pinyin_u_variants(value: str) -> str:
-    return (
-        value.replace("ü", "v")
-        .replace("Ü", "V")
-        .replace("u:", "v")
-        .replace("U:", "V")
-    )
+    return value.replace("ü", "v").replace("Ü", "V").replace("u:", "v").replace("U:", "V")
 
 
 def numbered_pinyin_part(value: str) -> str:
@@ -124,11 +118,13 @@ def canonical_pinyin_readings(value: str) -> list[PinyinReading]:
         spaced = re.sub(r"\s+", " ", spaced)
         compact = spaced.replace(" ", "")
         if compact:
-            readings.append(PinyinReading(
-                spaced=spaced,
-                compact=compact,
-                lower_compact=compact.lower(),
-            ))
+            readings.append(
+                PinyinReading(
+                    spaced=spaced,
+                    compact=compact,
+                    lower_compact=compact.lower(),
+                )
+            )
     return readings
 
 
@@ -462,9 +458,7 @@ def find_or_create_hanzi_form(
 
     entry_toneless_keys = toneless_pinyin_lookup_keys(entry["pinyin"])
     toneless_matches = [
-        form
-        for form in forms
-        if set(toneless_pinyin_lookup_keys(form.pinyin)).intersection(entry_toneless_keys)
+        form for form in forms if set(toneless_pinyin_lookup_keys(form.pinyin)).intersection(entry_toneless_keys)
     ]
     if len(toneless_matches) == 1:
         form_stats["matched"] += 1
@@ -481,15 +475,14 @@ def find_or_create_hanzi_form(
     word.sort_forms_by_pinyin()
     form_stats["created"] += 1
     record_form_match(form_stats, "created")
-    form_stats["created_entries"].append({
-        "entry": entry_summary(entry),
-        "lookup_key": entry_keys[0] if entry_keys else "",
-        "lookup_keys": entry_keys,
-        "available_form_pinyins": [
-            existing_form.pinyin
-            for existing_form in forms
-        ],
-    })
+    form_stats["created_entries"].append(
+        {
+            "entry": entry_summary(entry),
+            "lookup_key": entry_keys[0] if entry_keys else "",
+            "lookup_keys": entry_keys,
+            "available_form_pinyins": [existing_form.pinyin for existing_form in forms],
+        }
+    )
     return form, "created"
 
 
@@ -499,8 +492,7 @@ def pinyin_formatting_key(value: str) -> str:
 
 def apply_reference_pinyin_case(source_pinyin: str, reference_pinyin: str) -> str:
     reference_by_key = {
-        reading.lower_compact: reading.compact
-        for reading in canonical_pinyin_readings(reference_pinyin)
+        reading.lower_compact: reading.compact for reading in canonical_pinyin_readings(reference_pinyin)
     }
     cased_tokens: list[str] = []
 
@@ -629,9 +621,8 @@ def attach_deck_entries_to_state(
                 xiehanzi_pinyin=xiehanzi_pinyin,
             )
             form_stats["non_exact_matches"].append(match_record)
-            if (
-                match_type != "created"
-                and definitions_differ(match_record["cc_cedict_definitions"], match_record["xiehanzi_definitions"])
+            if match_type != "created" and definitions_differ(
+                match_record["cc_cedict_definitions"], match_record["xiehanzi_definitions"]
             ):
                 form_stats["non_exact_definition_mismatches"].append(match_record)
 
@@ -644,13 +635,15 @@ def attach_deck_entries_to_state(
             if old_pinyin and match_type != "created":
                 cased_pinyin = apply_reference_pinyin_case(new_pinyin, str(old_pinyin))
                 if cased_pinyin != new_pinyin:
-                    form_stats["pinyin_case_preserved"].append({
-                        "simplified": entry["simplified"],
-                        "cc_cedict_pinyin": old_pinyin,
-                        "xiehanzi_pinyin": new_pinyin,
-                        "merged_pinyin": cased_pinyin,
-                        "match_type": match_type,
-                    })
+                    form_stats["pinyin_case_preserved"].append(
+                        {
+                            "simplified": entry["simplified"],
+                            "cc_cedict_pinyin": old_pinyin,
+                            "xiehanzi_pinyin": new_pinyin,
+                            "merged_pinyin": cased_pinyin,
+                            "match_type": match_type,
+                        }
+                    )
                     new_pinyin = cased_pinyin
             if old_pinyin and old_pinyin != new_pinyin and match_type != "created":
                 override_record = {
@@ -759,14 +752,10 @@ def enrich_state(
     deck_entries, dropped_duplicates = dedupe_entries(raw_entries)
 
     missing_raw_before_stubs = [
-        entry_summary(entry)
-        for entry in raw_entries
-        if normalize_field(entry["simplified"]) not in base_word_index
+        entry_summary(entry) for entry in raw_entries if normalize_field(entry["simplified"]) not in base_word_index
     ]
     missing_deck_entries_before_stubs = [
-        entry
-        for entry in deck_entries
-        if normalize_field(entry["simplified"]) not in base_word_index
+        entry for entry in deck_entries if normalize_field(entry["simplified"]) not in base_word_index
     ]
     synthetic_words = build_synthetic_words(missing_deck_entries_before_stubs)
     for word in synthetic_words:
@@ -830,14 +819,8 @@ def enrich_state(
         "frequency_tags": frequency_tag_stats,
         "samples": {
             "missing_raw_entries": missing_raw_before_stubs[:25],
-            "missing_deck_entries": [
-                entry_summary(entry)
-                for entry in missing_deck_entries_before_stubs[:25]
-            ],
-            "synthetic_words": [
-                word.to_enriched_json()
-                for word in synthetic_words[:25]
-            ],
+            "missing_deck_entries": [entry_summary(entry) for entry in missing_deck_entries_before_stubs[:25]],
+            "synthetic_words": [word.to_enriched_json() for word in synthetic_words[:25]],
             "missing_deck_entries_after_stubs": missing_deck_after_stubs[:25],
             "hanzi_form_stubs": form_stats["created_entries"],
             "hanzi_non_exact_definition_mismatches": form_stats["non_exact_definition_mismatches"],

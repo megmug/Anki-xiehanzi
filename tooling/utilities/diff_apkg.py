@@ -134,11 +134,7 @@ def load_decks(raw_decks: dict[str, Any]) -> tuple[dict[int, str], dict[str, dic
     for raw_id, deck in raw_decks.items():
         name = str(deck.get("name") or f"<deck {raw_id}>")
         names_by_id[int(raw_id)] = name
-        by_name[name] = {
-            key: value
-            for key, value in deck.items()
-            if key not in {"id", "mod", "usn", "conf"}
-        }
+        by_name[name] = {key: value for key, value in deck.items() if key not in {"id", "mod", "usn", "conf"}}
     return names_by_id, by_name
 
 
@@ -262,11 +258,7 @@ def changed_model_fields(old: ModelSnapshot, new: ModelSnapshot) -> list[str]:
     if set(old.templates) != set(new.templates):
         changes.append("templates")
     else:
-        changed_templates = [
-            name
-            for name in old.templates
-            if old.templates[name] != new.templates[name]
-        ]
+        changed_templates = [name for name in old.templates if old.templates[name] != new.templates[name]]
         if changed_templates:
             changes.append("template bodies: " + ", ".join(changed_templates))
     return changes
@@ -308,10 +300,7 @@ def common_prefix_length(old_text: str, new_text: str) -> int:
 def common_suffix_length(old_text: str, new_text: str, prefix_length: int) -> int:
     limit = min(len(old_text), len(new_text)) - prefix_length
     index = 0
-    while (
-        index < limit
-        and old_text[len(old_text) - index - 1] == new_text[len(new_text) - index - 1]
-    ):
+    while index < limit and old_text[len(old_text) - index - 1] == new_text[len(new_text) - index - 1]:
         index += 1
     return index
 
@@ -359,13 +348,13 @@ def compact_segment(value: str, limit: int) -> str:
 def left_context(value: str, end: int, limit: int) -> str:
     if end <= limit:
         return value[:end]
-    return "… " + value[end - limit:end]
+    return "… " + value[end - limit : end]
 
 
 def right_context(value: str, start: int, limit: int) -> str:
     if len(value) - start <= limit:
         return value[start:]
-    return value[start:start + limit] + " …"
+    return value[start : start + limit] + " …"
 
 
 def inline_text_diff(old_value: str, new_value: str, *, strip_html: bool, context_chars: int = 80) -> str:
@@ -472,8 +461,7 @@ def build_report(
     removed_note_keys = sorted_keys(old_note_keys - new_note_keys)
     common_note_keys = sorted_keys(old_note_keys & new_note_keys)
     changed_note_keys = [
-        key for key in common_note_keys
-        if note_field_changes(old.notes[key], new.notes[key], include_build_id)
+        key for key in common_note_keys if note_field_changes(old.notes[key], new.notes[key], include_build_id)
     ]
 
     old_card_keys = set(old.cards)
@@ -481,8 +469,7 @@ def build_report(
     added_card_keys = sorted_keys(new_card_keys - old_card_keys)
     removed_card_keys = sorted_keys(old_card_keys - new_card_keys)
     changed_card_keys = [
-        key for key in sorted_keys(old_card_keys & new_card_keys)
-        if card_changes(old.cards[key], new.cards[key])
+        key for key in sorted_keys(old_card_keys & new_card_keys) if card_changes(old.cards[key], new.cards[key])
     ]
 
     old_model_names = set(old.models)
@@ -490,7 +477,8 @@ def build_report(
     added_models = sorted_keys(new_model_names - old_model_names)
     removed_models = sorted_keys(old_model_names - new_model_names)
     changed_models = [
-        name for name in sorted_keys(old_model_names & new_model_names)
+        name
+        for name in sorted_keys(old_model_names & new_model_names)
         if changed_model_fields(old.models[name], new.models[name])
     ]
 
@@ -503,10 +491,7 @@ def build_report(
     new_media = set(new.media)
     added_media = sorted_keys(new_media - old_media)
     removed_media = sorted_keys(old_media - new_media)
-    changed_media = [
-        name for name in sorted_keys(old_media & new_media)
-        if old.media[name] != new.media[name]
-    ]
+    changed_media = [name for name in sorted_keys(old_media & new_media) if old.media[name] != new.media[name]]
 
     lines: list[str] = [
         "# APKG Diff",
@@ -537,13 +522,15 @@ def build_report(
     ]
 
     if old.duplicate_note_keys or new.duplicate_note_keys:
-        lines.extend([
-            "## Warnings",
-            "",
-            f"- duplicate old note keys: {len(old.duplicate_note_keys)}",
-            f"- duplicate new note keys: {len(new.duplicate_note_keys)}",
-            "",
-        ])
+        lines.extend(
+            [
+                "## Warnings",
+                "",
+                f"- duplicate old note keys: {len(old.duplicate_note_keys)}",
+                f"- duplicate new note keys: {len(new.duplicate_note_keys)}",
+                "",
+            ]
+        )
 
     changed_model_rows: list[str] = []
     for name in changed_models:
@@ -555,9 +542,7 @@ def build_report(
                 f"  - fields: old `{', '.join(old_model.fields)}` / new `{', '.join(new_model.fields)}`"
             )
         if old_model.css != new_model.css:
-            changed_model_rows.append(
-                f"  - css: {template_diff_summary(old_model.css, new_model.css, preview_limit)}"
-            )
+            changed_model_rows.append(f"  - css: {template_diff_summary(old_model.css, new_model.css, preview_limit)}")
 
         removed_templates = sorted(set(old_model.templates) - set(new_model.templates))
         added_templates = sorted(set(new_model.templates) - set(old_model.templates))
@@ -595,14 +580,8 @@ def build_report(
                 )
     section_limited(lines, "Changed Notes", note_rows, None if limit is None else max(limit * 8, limit))
 
-    added_note_rows = [
-        f"- `{new.notes[key].label}`"
-        for key in added_note_keys
-    ]
-    removed_note_rows = [
-        f"- `{old.notes[key].label}`"
-        for key in removed_note_keys
-    ]
+    added_note_rows = [f"- `{new.notes[key].label}`" for key in added_note_keys]
+    removed_note_rows = [f"- `{old.notes[key].label}`" for key in removed_note_keys]
     section_limited(lines, "Added Notes", added_note_rows, limit)
     section_limited(lines, "Removed Notes", removed_note_rows, limit)
 
@@ -636,10 +615,18 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("old_apkg", type=Path, help="Old APKG file or directory containing exactly one APKG.")
     parser.add_argument("new_apkg", type=Path, help="New APKG file or directory containing exactly one APKG.")
-    parser.add_argument("--out", type=Path, default=DEFAULT_REPORT, help=f"Markdown report path. Default: {DEFAULT_REPORT}")
-    parser.add_argument("--include-build-id", action="store_true", help="Compare the BuildID field instead of ignoring it.")
-    parser.add_argument("--limit", type=int, default=None, help="Maximum rows per top-level section. Default: unlimited")
-    parser.add_argument("--preview-limit", type=int, default=240, help="Maximum inline value preview length. Default: 240")
+    parser.add_argument(
+        "--out", type=Path, default=DEFAULT_REPORT, help=f"Markdown report path. Default: {DEFAULT_REPORT}"
+    )
+    parser.add_argument(
+        "--include-build-id", action="store_true", help="Compare the BuildID field instead of ignoring it."
+    )
+    parser.add_argument(
+        "--limit", type=int, default=None, help="Maximum rows per top-level section. Default: unlimited"
+    )
+    parser.add_argument(
+        "--preview-limit", type=int, default=240, help="Maximum inline value preview length. Default: 240"
+    )
     return parser.parse_args()
 
 

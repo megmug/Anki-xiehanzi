@@ -1,0 +1,11 @@
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+exclude = [
+  "build_reports",
+  "deck_inputs",
+  "master_db_output",
+  "node_modules",
+  "result",
+  "tooling/utilities/migrate-*.py",
+]

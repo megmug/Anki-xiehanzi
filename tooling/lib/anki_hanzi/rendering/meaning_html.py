@@ -39,9 +39,7 @@ def numbered_to_display(value: str) -> str:
             continue
         if re.search(r"\d", part):
             try:
-                parts.append(transcriptions.numbered_to_accented(
-                    normalize_numbered_pinyin_token(part)
-                ))
+                parts.append(transcriptions.numbered_to_accented(normalize_numbered_pinyin_token(part)))
                 continue
             except ValueError:
                 pass
@@ -83,10 +81,7 @@ def colored_characters(value: str, pinyin: str) -> str:
         )
 
     fallback_tone = tone_from_numbered_syllable(syllables[0]) if syllables else 5
-    return "".join(
-        f'<span class="text-color{fallback_tone}">{character}</span>'
-        for character in characters
-    )
+    return "".join(f'<span class="text-color{fallback_tone}">{character}</span>' for character in characters)
 
 
 def rendered_definitions(form: LexiconForm) -> list[str]:
@@ -112,11 +107,13 @@ def render_meaning_form(word: LexiconWord, form: LexiconForm) -> str:
         " </div>",
     ]
 
-    output.extend([
-        " ",
-        pinyin_html(pinyin),
-        " <ul>",
-    ])
+    output.extend(
+        [
+            " ",
+            pinyin_html(pinyin),
+            " <ul>",
+        ]
+    )
     for definition in rendered_definitions(form):
         output.append(f"  <li>{html.escape(definition, quote=False)}</li>")
     output.append(" </ul>  ")
@@ -146,7 +143,4 @@ def render_meaning_group(word: LexiconWord, forms: list[LexiconForm]) -> str:
 
 
 def render_meaning_html(word: LexiconWord) -> str:
-    return "".join(
-        render_meaning_form(word, form)
-        for form in word.forms_in_order()
-    )
+    return "".join(render_meaning_form(word, form) for form in word.forms_in_order())
