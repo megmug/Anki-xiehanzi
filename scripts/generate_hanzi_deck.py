@@ -225,7 +225,7 @@ def build_hanzi_writer_bundle(
                 unique_chars.add(char)
 
     data: dict[str, Any] = {}
-    for char in unique_chars:
+    for char in sorted(unique_chars):
         data_file = common.HANZI_WRITER_DATA_DIR / f"{char}.json"
         if data_file.exists():
             data[char] = json.loads(data_file.read_text(encoding="utf-8"))
