@@ -1,15 +1,16 @@
 #!/usr/bin/env python
 
-"""Render hanzi Meaning HTML from enriched lexicon word data."""
+"""Render hanzi Meaning HTML from enriched lexicon state data."""
 
 from __future__ import annotations
 
 import re
 import html
-from typing import Any
 
 from colorize_pinyin import colorized_HTML_string_from_string
 from dragonmapper import transcriptions
+
+from anki_hanzi.lexicon import LexiconForm, LexiconWord
 
 
 TONE_CLASSES = ["text-color5", "text-color1", "text-color2", "text-color3", "text-color4"]
@@ -90,10 +91,10 @@ def colored_characters(value: str, pinyin: str) -> str:
     )
 
 
-def rendered_definitions(form: dict[str, Any]) -> list[str]:
+def rendered_definitions(form: LexiconForm) -> list[str]:
     definitions: list[str] = []
     seen: set[str] = set()
-    for definition in form.get("definitions", []):
+    for definition in form.definitions:
         for part in re.split(r";\s*", str(definition)):
             value = part.strip()
             if not value or value in seen:
@@ -103,9 +104,9 @@ def rendered_definitions(form: dict[str, Any]) -> list[str]:
     return definitions
 
 
-def render_meaning_form(word: dict[str, Any], form: dict[str, Any]) -> str:
-    simplified = str(word.get("simplified") or "")
-    pinyin = str(form.get("pinyin") or "")
+def render_meaning_form(word: LexiconWord, form: LexiconForm) -> str:
+    simplified = word.simplified
+    pinyin = form.pinyin
 
     output = [
         '<div class="char">  ',
@@ -124,9 +125,9 @@ def render_meaning_form(word: dict[str, Any], form: dict[str, Any]) -> str:
     return "".join(output)
 
 
-def merge_meaning_forms(forms: list[dict[str, Any]]) -> dict[str, Any]:
+def merge_meaning_forms(forms: list[LexiconForm]) -> LexiconForm:
     if not forms:
-        return {"pinyin": "", "definitions": []}
+        return LexiconForm(pinyin="", definitions=[])
 
     definitions: list[str] = []
     seen: set[str] = set()
@@ -137,20 +138,17 @@ def merge_meaning_forms(forms: list[dict[str, Any]]) -> dict[str, Any]:
             definitions.append(definition)
             seen.add(definition)
 
-    return {
-        "pinyin": str(forms[0].get("pinyin") or ""),
-        "definitions": definitions,
-    }
+    return LexiconForm(pinyin=forms[0].pinyin, definitions=definitions)
 
 
-def render_meaning_group(word: dict[str, Any], forms: list[dict[str, Any]]) -> str:
+def render_meaning_group(word: LexiconWord, forms: list[LexiconForm]) -> str:
     if not forms:
         return ""
     return render_meaning_form(word, merge_meaning_forms(forms))
 
 
-def render_meaning_html(word: dict[str, Any]) -> str:
+def render_meaning_html(word: LexiconWord) -> str:
     return "".join(
         render_meaning_form(word, form)
-        for form in word.get("forms", [])
+        for form in word.forms_in_order()
     )

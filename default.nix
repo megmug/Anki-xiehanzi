@@ -339,9 +339,6 @@ PY
         echo "=== edge-tts available ==="
       fi
 
-      python tooling/build/build_cc_cedict_master_db.py
-      python tooling/build/enrich_hanzi_db.py
-
       # Nix source paths use normalized mtimes that can predate ZIP's 1980
       # lower bound. Use the generator's fixed ZIP timestamp for all media
       # files materialized in this transitional store build.

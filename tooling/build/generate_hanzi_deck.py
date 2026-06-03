@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 
 """
-Build the customized hanzi APKG from the enriched JSON database.
+Build the customized hanzi APKG from the typed lexicon pipeline.
 
-The generator reads word/card data from
-`master_db_output/cc_cedict_hanzi_enriched.json` and uses the shared deck
-build helpers in `tooling/lib/anki_hanzi/deck/common.py` for templates, media, and stable
-Anki ids.
+The generator builds the CC-CEDICT state, enriches it with hanzi deck-source
+data in memory, and uses the shared deck build helpers in
+`tooling/lib/anki_hanzi/deck/common.py` for templates, media, and stable Anki
+ids.
 
 `deck_inputs/deck_config.json` controls which tagged hanzi forms are emitted
 as notes, which card types are generated, and optional per-card display
@@ -38,10 +38,21 @@ import genanki
 from anki_hanzi.audio.generation import AudioGenerator
 from anki_hanzi.deck import DeckConfig
 from anki_hanzi.deck import common
+from anki_hanzi.enrichment.hanzi import (
+    DEFAULT_FREQUENCY_LIST,
+    DEFAULT_HSK_DATA_DIR,
+    DEFAULT_MASTER_DB,
+    DEFAULT_OUTPUT as DEFAULT_ENRICHED_DB_OUTPUT,
+    DEFAULT_REPORT as DEFAULT_ENRICHMENT_REPORT,
+    HANZI_DEDUPE_KEY,
+    enrich_state,
+)
+from anki_hanzi.lexicon import ENRICHED_LEXICON_SCHEMA, LexiconForm, LexiconState, LexiconWord
+from anki_hanzi.lexicon.cc_cedict import load_cedict_state, load_snapshot_manifest, resolve_source_file
 from anki_hanzi.rendering.meaning_html import numbered_to_display, render_meaning_group, render_meaning_html
 
 
-DEFAULT_ENRICHED_DB = Path("master_db_output/cc_cedict_hanzi_enriched.json")
+DEFAULT_SNAPSHOT_MANIFEST = Path("deck_inputs/cc-cedict/snapshot.json")
 DEFAULT_DECK_CONFIG = Path("deck_inputs/deck_config.json")
 DEFAULT_AUDIO_EXCEPTIONS = Path("deck_inputs/audio_generation_exceptions.json")
 DEFAULT_REPORT_PATH = Path("build_reports/generate_hanzi_report.json")
@@ -49,6 +60,14 @@ DEFAULT_GENANKI_TIMESTAMP = 1779251987.6
 DEFAULT_GENERATED_ZIP_DATETIME = (2026, 5, 20, 6, 39, 48)
 DEFAULT_ZIP_DATETIME = (1980, 1, 1, 0, 0, 0)
 GENERATED_ZIP_MEMBERS = {"collection.anki2", "media"}
+
+
+def write_json(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 @dataclass(frozen=True)
@@ -105,6 +124,13 @@ class DeckSelection:
             "tags": list(self.tags),
             "individual_simplified": sorted(self.individual_simplified),
         }
+
+
+@dataclass(frozen=True)
+class ReadingGroup:
+    display_pinyin: str
+    forms: tuple[LexiconForm, ...]
+    tags: frozenset[str]
 
 
 def normalize_simplified(value: Any) -> str:
@@ -240,13 +266,13 @@ def build_hanzi_writer_bundle(
     return str(output_path)
 
 
-def _resolve_display_pinyin(form: dict[str, Any]) -> str:
-    return numbered_to_display(str(form.get("pinyin", "")))
+def _resolve_display_pinyin(form: LexiconForm) -> str:
+    return numbered_to_display(form.pinyin)
 
 
-def _effective_form_tags(word: dict[str, Any], form: dict[str, Any]) -> set[str]:
-    form_tags = set(form.get("tags", []))
-    fallback_tags = set(word.get("tags", []))
+def _effective_form_tags(word: LexiconWord, form: LexiconForm) -> set[str]:
+    form_tags = set(form.tags)
+    fallback_tags = set(word.tags)
     return form_tags or fallback_tags
 
 
@@ -266,13 +292,13 @@ def _is_form_selected(
 
 
 def _selected_reading_groups(
-    word: dict[str, Any],
-    forms: list[dict[str, Any]],
+    word: LexiconWord,
+    forms: list[LexiconForm],
     mode: str,
     selection_tags: set[str],
     is_individual: bool,
-) -> list[dict[str, Any]]:
-    groups: dict[str, list[dict[str, Any]]] = {}
+) -> list[ReadingGroup]:
+    groups: dict[str, list[LexiconForm]] = {}
     display_by_key: dict[str, str] = {}
     selected_display_by_key: dict[str, str] = {}
 
@@ -289,7 +315,7 @@ def _selected_reading_groups(
         if _is_form_selected(effective_tags, mode, selection_tags, is_individual):
             selected_display_by_key.setdefault(normalized_pinyin, display_pinyin)
 
-    reading_groups: list[dict[str, Any]] = []
+    reading_groups: list[ReadingGroup] = []
     for normalized_pinyin, group_forms in groups.items():
         if normalized_pinyin not in selected_display_by_key:
             continue
@@ -298,43 +324,43 @@ def _selected_reading_groups(
         for form in group_forms:
             group_tags.update(_effective_form_tags(word, form))
 
-        reading_groups.append({
-            "display_pinyin": selected_display_by_key.get(normalized_pinyin)
+        reading_groups.append(ReadingGroup(
+            display_pinyin=selected_display_by_key.get(normalized_pinyin)
             or display_by_key[normalized_pinyin],
-            "forms": group_forms,
-            "tags": group_tags,
-        })
+            forms=tuple(group_forms),
+            tags=frozenset(group_tags),
+        ))
     return reading_groups
 
 
-def _word_tags(word: dict[str, Any], forms: list[dict[str, Any]]) -> set[str]:
-    tags = set(word.get("tags", []))
+def _word_tags(word: LexiconWord, forms: list[LexiconForm]) -> set[str]:
+    tags = set(word.tags)
     for form in forms:
-        tags.update(form.get("tags", []))
+        tags.update(form.tags)
     return tags
 
 
 def _selected_word_forms(
-    word: dict[str, Any],
-    forms: list[dict[str, Any]],
+    word: LexiconWord,
+    forms: list[LexiconForm],
     mode: str,
     selection_tags: set[str],
     is_individual: bool,
-) -> list[dict[str, Any]]:
+) -> list[LexiconForm]:
     if is_individual or mode == "all":
         return forms
 
     if mode != "tagged":
         return []
 
-    word_tags = set(word.get("tags", []))
+    word_tags = set(word.tags)
     for form in forms:
-        if (word_tags | set(form.get("tags", []))) & selection_tags:
+        if (word_tags | set(form.tags)) & selection_tags:
             return forms
     return []
 
 
-def _display_pinyin_readings(forms: list[dict[str, Any]]) -> str:
+def _display_pinyin_readings(forms: list[LexiconForm]) -> str:
     readings: list[str] = []
     seen: set[str] = set()
     for form in forms:
@@ -366,13 +392,11 @@ def _audio_entries(entries: list[EnrichedWordEntry]) -> list[EnrichedWordEntry]:
     return deduped
 
 
-def load_enriched_entries(
-    enriched_db_path: Path,
+def build_entries_from_state(
+    state: LexiconState,
     selection: DeckSelection,
-    config: DeckConfig,
     audio_generator: AudioGenerator,
-) -> tuple[dict[str, list[EnrichedWordEntry]], dict[str, Any], dict[str, Any]]:
-    database = json.loads(enriched_db_path.read_text(encoding="utf-8"))
+) -> tuple[dict[str, list[EnrichedWordEntry]], dict[str, Any]]:
     meaning_entries: list[EnrichedWordEntry] = []
     pinyin_entries: list[EnrichedWordEntry] = []
     write_entries: list[EnrichedWordEntry] = []
@@ -382,17 +406,15 @@ def load_enriched_entries(
     seen_word_level_words: set[str] = set()
     selection_tags = set(selection.tags)
 
-    for word in database.get("words", []):
-        simplified = normalize_simplified(word["simplified"])
+    for word in state.sorted_words():
+        simplified = normalize_simplified(word.simplified)
 
         is_individual = simplified in selection.individual_simplified
         mode = selection.mode
 
         rendered_definition_html = render_meaning_html(word)
 
-        forms = word.get("forms", [])
-        if not forms:
-            forms = [{}]
+        forms = word.forms_in_order()
 
         selected_word_forms = _selected_word_forms(
             word=word,
@@ -426,7 +448,7 @@ def load_enriched_entries(
             selection_tags=selection_tags,
             is_individual=is_individual,
         ):
-            display_pinyin = reading_group["display_pinyin"]
+            display_pinyin = reading_group.display_pinyin
             entry_key = (simplified, common.normalized_note_pinyin(display_pinyin))
             if not entry_key[1] or entry_key in seen_entry_keys:
                 continue
@@ -440,10 +462,10 @@ def load_enriched_entries(
                 simplified=simplified,
                 pinyin=display_pinyin,
                 definition_html=rendered_definition_html,
-                meaning_definition_html=render_meaning_group(word, reading_group["forms"]),
+                meaning_definition_html=render_meaning_group(word, list(reading_group.forms)),
                 audio_filename_primary=audio_filename_primary,
                 audio_filename_secondary=audio_filename_secondary,
-                tags=tuple(sorted(reading_group["tags"] | {"source:xiehanzi"})),
+                tags=tuple(sorted(set(reading_group.tags) | {"source:xiehanzi"})),
             )
             meaning_entries.append(entry)
             word_entry_count += 1
@@ -472,7 +494,7 @@ def load_enriched_entries(
         },
     }
 
-    return entries_by_card_type, database, selection_report
+    return entries_by_card_type, selection_report
 
 
 def collect_media(entries: list[EnrichedWordEntry], static_media: list[str]) -> tuple[list[str], list[str]]:
@@ -577,8 +599,47 @@ def write_package(
         temporary_path.unlink(missing_ok=True)
 
 
+def build_enriched_state(
+    snapshot_manifest: Path,
+    source_file: Path | None,
+    master_db_output: Path,
+    enriched_db_output: Path,
+    enrichment_report_path: Path,
+    hsk_data_dir: Path,
+    frequency_list: Path,
+) -> LexiconState:
+    manifest = load_snapshot_manifest(snapshot_manifest)
+    resolved_source_file = resolve_source_file(snapshot_manifest, manifest, source_file)
+    if not resolved_source_file.exists():
+        raise FileNotFoundError(f"missing CC-CEDICT source file: {resolved_source_file}")
+
+    state = load_cedict_state(
+        source_file=resolved_source_file,
+        url=manifest["source_url"],
+        expected_sha256=manifest["sha256"],
+    )
+    state.sort_forms_by_pinyin()
+    write_json(master_db_output, state.to_master_json())
+
+    enrich_state(
+        master_state=state,
+        input_label=str(master_db_output),
+        output_path=enriched_db_output,
+        report_path=enrichment_report_path,
+        hsk_data_dir=hsk_data_dir,
+        frequency_list_path=frequency_list,
+    )
+    return state
+
+
 def build_package(
-    enriched_db: Path,
+    snapshot_manifest: Path,
+    source_file: Path | None,
+    master_db_output: Path,
+    enriched_db_output: Path,
+    enrichment_report_path: Path,
+    hsk_data_dir: Path,
+    frequency_list: Path,
     deck_config_path: Path | None,
     output_apkg: Path,
     report_path: Path,
@@ -592,10 +653,18 @@ def build_package(
         exceptions_path=DEFAULT_AUDIO_EXCEPTIONS,
     )
     selection = load_deck_selection(deck_config_path)
-    entries_by_card_type, database, selection_report = load_enriched_entries(
-        enriched_db,
+    state = build_enriched_state(
+        snapshot_manifest=snapshot_manifest,
+        source_file=source_file,
+        master_db_output=master_db_output,
+        enriched_db_output=enriched_db_output,
+        enrichment_report_path=enrichment_report_path,
+        hsk_data_dir=hsk_data_dir,
+        frequency_list=frequency_list,
+    )
+    entries_by_card_type, selection_report = build_entries_from_state(
+        state,
         selection,
-        config,
         audio_generator,
     )
     all_entries = _all_entries(entries_by_card_type)
@@ -638,14 +707,16 @@ def build_package(
     report = {
         "output": str(output_apkg),
         "report": str(report_path),
-        "enriched_db": str(enriched_db),
+        "master_db": str(master_db_output),
+        "enriched_db": str(enriched_db_output),
+        "enrichment_report": str(enrichment_report_path),
         "deck_config": selection_report,
-        "source_schema": database.get("schema"),
+        "source_schema": ENRICHED_LEXICON_SCHEMA,
         "deck_root": common.DECK_ROOT,
         "build_id": build_id,
         "card_types": list(config.card_types),
         "card_settings": config.card_settings,
-        "dedupe_key": database.get("enrichment", {}).get("dedupe_key"),
+        "dedupe_key": HANZI_DEDUPE_KEY,
         "total_words": len(unique_words),
         "entries_by_card_type": {
             card_type: len(entries)
@@ -666,8 +737,8 @@ def build_package(
         "failed_audio_generation": audio_result.report_failed(),
         "skipped_audio_generation": audio_result.report_skipped(),
         "removed_zero_length_audio_files": audio_result.removed_zero_length,
-        "dropped_duplicate_occurrences": len(database.get("hanzi", {}).get("dropped_duplicates", [])),
-        "dropped_duplicates": database.get("hanzi", {}).get("dropped_duplicates", []),
+        "dropped_duplicate_occurrences": len(state.hanzi_dropped_duplicates),
+        "dropped_duplicates": list(state.hanzi_dropped_duplicates),
         "missing_audio_files": missing_audio,
     }
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -680,7 +751,28 @@ def build_package(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--enriched-db", type=Path, default=DEFAULT_ENRICHED_DB, help="Input enriched JSON database.")
+    parser.add_argument(
+        "--snapshot-manifest",
+        type=Path,
+        default=DEFAULT_SNAPSHOT_MANIFEST,
+        help="Snapshot manifest with the pinned CC-CEDICT source filename, SHA256, and source URL.",
+    )
+    parser.add_argument("--source-file", type=Path, default=None, help="Optional pinned CC-CEDICT text file override.")
+    parser.add_argument("--master-db-output", type=Path, default=DEFAULT_MASTER_DB, help="Diagnostic master JSON output.")
+    parser.add_argument(
+        "--enriched-db-output",
+        type=Path,
+        default=DEFAULT_ENRICHED_DB_OUTPUT,
+        help="Diagnostic enriched JSON output.",
+    )
+    parser.add_argument(
+        "--enrichment-report",
+        type=Path,
+        default=DEFAULT_ENRICHMENT_REPORT,
+        help="Diagnostic enrichment report JSON output.",
+    )
+    parser.add_argument("--hsk-data-dir", type=Path, default=DEFAULT_HSK_DATA_DIR, help="Prepared hanzi HSK TSV directory.")
+    parser.add_argument("--frequency-list", type=Path, default=DEFAULT_FREQUENCY_LIST, help="Simplified word frequency list sorted by usage.")
     parser.add_argument("--config", type=Path, default=DEFAULT_DECK_CONFIG, help="Deck selection JSON config.")
     parser.add_argument("--output", type=Path, default=None, help="Output APKG path.")
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH, help="Output report JSON path.")
@@ -706,8 +798,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    if not args.enriched_db.exists():
-        print(f"missing enriched DB: {args.enriched_db}")
+    if not args.snapshot_manifest.exists():
+        print(f"missing snapshot manifest: {args.snapshot_manifest}")
+        return 2
+    if not args.hsk_data_dir.exists():
+        print(f"missing hanzi HSK data dir: {args.hsk_data_dir}")
+        return 2
+    if not args.frequency_list.exists():
+        print(f"missing frequency list: {args.frequency_list}")
         return 2
 
     output_apkg = args.output
@@ -715,7 +813,13 @@ def main() -> int:
         output_apkg = common.OUTPUT_APKG
 
     report = build_package(
-        enriched_db=args.enriched_db,
+        snapshot_manifest=args.snapshot_manifest,
+        source_file=args.source_file,
+        master_db_output=args.master_db_output,
+        enriched_db_output=args.enriched_db_output,
+        enrichment_report_path=args.enrichment_report,
+        hsk_data_dir=args.hsk_data_dir,
+        frequency_list=args.frequency_list,
         deck_config_path=args.config,
         output_apkg=output_apkg,
         report_path=args.report,
