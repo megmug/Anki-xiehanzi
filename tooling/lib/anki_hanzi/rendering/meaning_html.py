@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 """Render hanzi Meaning HTML from enriched lexicon state data."""
 
 from __future__ import annotations

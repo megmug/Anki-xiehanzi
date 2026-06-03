@@ -10,11 +10,9 @@ nix-build
 
 ## Build
 
-`default.nix` invokes `build/generate_hanzi_deck.py` during the normal APKG build.
+`default.nix` invokes one build entry point during the normal APKG build.
 
 - `build/generate_hanzi_deck.py`: build the typed lexicon state, write diagnostic JSON artifacts, and generate the APKG.
-- `build/build_cc_cedict_master_db.py`: manually write the compact CC-CEDICT master lexicon JSON from the pinned snapshot.
-- `build/enrich_hanzi_db.py`: manually write the hanzi-enriched lexicon JSON and report from a master lexicon JSON.
 
 ## Utilities
 
@@ -29,6 +27,7 @@ These programs are run manually for maintenance, analysis, or upgrades.
 
 These modules are imported by build programs and are not direct entry points.
 
+- `lib/anki_hanzi/deck/build.py`: typed lexicon-to-APKG build orchestration.
 - `lib/anki_hanzi/deck/common.py`: shared template, media, model, config, and stable-id helpers.
 - `lib/anki_hanzi/enrichment/`: hanzi HSK, xiehanzi, and frequency enrichment stages.
 - `lib/anki_hanzi/lexicon/`: internal lexicon state and CC-CEDICT source parser.

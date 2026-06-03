@@ -1,20 +1,11 @@
-#!/usr/bin/env python
-
 """
-Enrich the compact CC-CEDICT master JSON with hanzi deck-source data.
+Enrich the CC-CEDICT lexicon state with hanzi deck-source data.
 
-This is a separate pipeline stage:
+This module is part of the in-memory APKG build pipeline:
 
-    CC-CEDICT master JSON + hanzi TSV files -> enriched JSON -> deck generator
+    CC-CEDICT source + hanzi TSV files -> enriched LexiconState -> APKG
 
-The enriched output keeps the CC-CEDICT words as the organizing structure and
-tags matching forms with the HSK levels that include them. The deck generator
-selects concrete forms by those tags, keeping ingestion independent from APKG
-generation.
-
-Run from the repository root inside the Nix shell:
-
-    nix-shell --run "python tooling/build/enrich_hanzi_db.py"
+The optional enriched JSON and report are diagnostic build artifacts.
 """
 
 from __future__ import annotations

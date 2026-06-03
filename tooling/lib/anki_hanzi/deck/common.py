@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 """Shared helpers for building the custom hanzi APKG."""
 
 from __future__ import annotations
