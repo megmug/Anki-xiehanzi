@@ -28,11 +28,13 @@ from anki_hanzi.lexicon import (
     LexiconState,
     LexiconWord,
 )
+from anki_hanzi.enrichment.matching import build_matching_report
 
 
 DEFAULT_MASTER_DB = Path("master_db_output/cc_cedict_master.json")
 DEFAULT_OUTPUT = Path("master_db_output/cc_cedict_hanzi_enriched.json")
 DEFAULT_REPORT = Path("master_db_output/hanzi_enrichment_report.json")
+DEFAULT_MATCHING_REPORT = Path("master_db_output/hanzi_matching_report.json")
 DEFAULT_DECK_INPUTS_DIR = Path("deck_inputs")
 DEFAULT_HSK_DATA_DIR = DEFAULT_DECK_INPUTS_DIR / "hsk-3.0-words-list/New HSK (2025)/Anki xiehanzi"
 DEFAULT_FREQUENCY_LIST = (
@@ -741,6 +743,7 @@ def enrich_state(
     input_label: str,
     output_path: Path,
     report_path: Path,
+    matching_report_path: Path | None,
     hsk_data_dir: Path,
     frequency_list_path: Path,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -750,6 +753,12 @@ def enrich_state(
 
     raw_entries = load_hanzi_entries(hsk_data_dir=hsk_data_dir)
     deck_entries, dropped_duplicates = dedupe_entries(raw_entries)
+    matching_report = build_matching_report(
+        state=master_state,
+        raw_entries=raw_entries,
+        deck_entries=deck_entries,
+        dropped_duplicates=dropped_duplicates,
+    )
 
     missing_raw_before_stubs = [
         entry_summary(entry) for entry in raw_entries if normalize_field(entry["simplified"]) not in base_word_index
@@ -815,7 +824,9 @@ def enrich_state(
         "input": input_label,
         "output": str(output_path),
         "report": str(report_path),
+        "matching_report": str(matching_report_path) if matching_report_path is not None else None,
         "summary": enriched["summary"],
+        "matching_summary": matching_report["summary"],
         "frequency_tags": frequency_tag_stats,
         "samples": {
             "missing_raw_entries": missing_raw_before_stubs[:25],
@@ -832,6 +843,12 @@ def enrich_state(
     }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    if matching_report_path is not None:
+        matching_report_path.parent.mkdir(parents=True, exist_ok=True)
+        matching_report_path.write_text(
+            json.dumps(matching_report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
     output_path.write_text(
         json.dumps(enriched, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -851,6 +868,7 @@ def enrich_database(
     master_db_path: Path,
     output_path: Path,
     report_path: Path,
+    matching_report_path: Path | None,
     hsk_data_dir: Path,
     frequency_list_path: Path,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -859,6 +877,7 @@ def enrich_database(
         input_label=str(master_db_path),
         output_path=output_path,
         report_path=report_path,
+        matching_report_path=matching_report_path,
         hsk_data_dir=hsk_data_dir,
         frequency_list_path=frequency_list_path,
     )

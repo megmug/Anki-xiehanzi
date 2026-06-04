@@ -20,6 +20,7 @@ from anki_hanzi.enrichment.hanzi import (
     DEFAULT_FREQUENCY_LIST,
     DEFAULT_HSK_DATA_DIR,
     DEFAULT_MASTER_DB,
+    DEFAULT_MATCHING_REPORT,
     DEFAULT_OUTPUT as DEFAULT_ENRICHED_DB_OUTPUT,
     DEFAULT_REPORT as DEFAULT_ENRICHMENT_REPORT,
     HANZI_DEDUPE_KEY,
@@ -556,6 +557,7 @@ def build_enriched_state(
     master_db_output: Path,
     enriched_db_output: Path,
     enrichment_report_path: Path,
+    matching_report_path: Path | None,
     hsk_data_dir: Path,
     frequency_list: Path,
 ) -> LexiconState:
@@ -577,6 +579,7 @@ def build_enriched_state(
         input_label=str(master_db_output),
         output_path=enriched_db_output,
         report_path=enrichment_report_path,
+        matching_report_path=matching_report_path,
         hsk_data_dir=hsk_data_dir,
         frequency_list_path=frequency_list,
     )
@@ -589,6 +592,7 @@ def build_package(
     master_db_output: Path,
     enriched_db_output: Path,
     enrichment_report_path: Path,
+    matching_report_path: Path | None,
     hsk_data_dir: Path,
     frequency_list: Path,
     deck_config_path: Path | None,
@@ -610,6 +614,7 @@ def build_package(
         master_db_output=master_db_output,
         enriched_db_output=enriched_db_output,
         enrichment_report_path=enrichment_report_path,
+        matching_report_path=matching_report_path,
         hsk_data_dir=hsk_data_dir,
         frequency_list=frequency_list,
     )
@@ -654,6 +659,7 @@ def build_package(
         "master_db": str(master_db_output),
         "enriched_db": str(enriched_db_output),
         "enrichment_report": str(enrichment_report_path),
+        "matching_report": str(matching_report_path) if matching_report_path is not None else None,
         "deck_config": selection_report,
         "source_schema": ENRICHED_LEXICON_SCHEMA,
         "deck_root": common.DECK_ROOT,

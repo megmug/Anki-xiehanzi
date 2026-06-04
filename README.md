@@ -60,7 +60,7 @@ On a Linux machine with an NVIDIA GPU and `audio.engine` set to `kokoro`, Nix pr
 If no NVIDIA driver is available, or on macOS, the build uses CPU PyTorch.
 
 `nix-build` creates the default `result` symlink.
-The build result contains the hash-named APKG, generated reports, and any checked-in migration scripts.
+The build result contains the hash-named APKG, generated reports, including the xiehanzi-to-CC-CEDICT matching report, and any checked-in migration scripts.
 
 ## Repository Layout
 

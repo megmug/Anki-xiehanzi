@@ -21,6 +21,7 @@ from anki_hanzi.deck.build import (
     DEFAULT_GENANKI_TIMESTAMP,
     DEFAULT_HSK_DATA_DIR,
     DEFAULT_MASTER_DB,
+    DEFAULT_MATCHING_REPORT,
     DEFAULT_REPORT_PATH,
     DEFAULT_SNAPSHOT_MANIFEST,
     build_package,
@@ -60,6 +61,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_ENRICHMENT_REPORT,
         help="Diagnostic enrichment report JSON output.",
+    )
+    parser.add_argument(
+        "--matching-report",
+        type=Path,
+        default=DEFAULT_MATCHING_REPORT,
+        help="Report-only xiehanzi-to-CC-CEDICT candidate matching JSON output.",
     )
     parser.add_argument(
         "--hsk-data-dir", type=Path, default=DEFAULT_HSK_DATA_DIR, help="Prepared hanzi HSK TSV directory."
@@ -115,6 +122,7 @@ def main() -> int:
         master_db_output=args.master_db_output,
         enriched_db_output=args.enriched_db_output,
         enrichment_report_path=args.enrichment_report,
+        matching_report_path=args.matching_report,
         hsk_data_dir=args.hsk_data_dir,
         frequency_list=args.frequency_list,
         deck_config_path=args.config,
