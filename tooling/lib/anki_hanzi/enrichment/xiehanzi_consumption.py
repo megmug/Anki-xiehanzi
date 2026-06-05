@@ -1,0 +1,813 @@
+"""Consumption rules for xiehanzi matching and LexiconState enrichment.
+
+The first rule layer mutates only pipeline working sets. The second layer
+applies the selected buckets to the LexiconState.
+"""
+
+from __future__ import annotations
+
+import html
+import re
+import unicodedata
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
+
+from dragonmapper import transcriptions
+
+from anki_hanzi.lexicon import LexiconForm, LexiconState, LexiconWord
+
+
+ConsumptionRuleHandler = Callable[..., dict[str, Any]]
+StateConsumptionRuleHandler = Callable[..., dict[str, Any]]
+
+PINYIN_SEPARATOR_RE = re.compile(r"[\s'’\-·]+")
+LI_RE = re.compile(r"<li>(.*?)</li>", re.IGNORECASE | re.DOTALL)
+
+
+@dataclass(frozen=True)
+class ConsumptionRuleDefinition:
+    name: str
+    report_only_effect: str
+    enrichment_effect: str
+    handler: ConsumptionRuleHandler
+
+
+@dataclass(frozen=True)
+class StateConsumptionRuleDefinition:
+    name: str
+    bucket: str
+    state_effect: str
+    handler: StateConsumptionRuleHandler
+
+
+@dataclass(frozen=True)
+class PinyinReading:
+    spaced: str
+    compact: str
+    lower_compact: str
+
+
+def normalize_field(value: str) -> str:
+    value = html.unescape(value or "")
+    value = re.sub(r"<[^>]+>", " ", value)
+    value = unicodedata.normalize("NFC", value)
+    return re.sub(r"\s+", "", value).strip().lower()
+
+
+def normalize_pinyin_u_variants(value: str) -> str:
+    return value.replace("ü", "v").replace("Ü", "V").replace("u:", "v").replace("U:", "V")
+
+
+def numbered_pinyin_part(value: str) -> str:
+    value = unicodedata.normalize("NFC", value.strip())
+    if not value:
+        return ""
+    if re.search(r"\d", value):
+        numbered = value
+    else:
+        try:
+            numbered = transcriptions.accented_to_numbered(value)
+        except ValueError:
+            numbered = value
+    return normalize_pinyin_u_variants(numbered)
+
+
+def canonical_pinyin_readings(value: str) -> list[PinyinReading]:
+    readings: list[PinyinReading] = []
+    for part in re.split(r"/", value or ""):
+        numbered = numbered_pinyin_part(part)
+        if not numbered:
+            continue
+
+        spaced = PINYIN_SEPARATOR_RE.sub(" ", numbered).strip()
+        spaced = re.sub(r"\s+", " ", spaced)
+        compact = spaced.replace(" ", "")
+        if compact:
+            readings.append(
+                PinyinReading(
+                    spaced=spaced,
+                    compact=compact,
+                    lower_compact=compact.lower(),
+                )
+            )
+    return readings
+
+
+def pinyin_lookup_keys(value: str) -> list[str]:
+    keys: list[str] = []
+    for reading in canonical_pinyin_readings(value):
+        key = reading.lower_compact
+        if key not in keys:
+            keys.append(key)
+    return keys
+
+
+def pinyin_lookup_key(value: str) -> str:
+    keys = pinyin_lookup_keys(value)
+    return keys[0] if keys else ""
+
+
+def toneless_pinyin_lookup_keys(value: str) -> list[str]:
+    keys: list[str] = []
+    for key in pinyin_lookup_keys(value):
+        toneless_key = re.sub(r"\d", "", key)
+        if toneless_key and toneless_key not in keys:
+            keys.append(toneless_key)
+    return keys
+
+
+def entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
+    summary = {
+        "simplified": entry["simplified"],
+        "traditional": entry["traditional"],
+        "pinyin": entry["pinyin"],
+        "zhuyin": entry["zhuyin"],
+        "deck_level": entry["deck_level"],
+        "raw_level": entry["raw_level"],
+        "source": entry["source"],
+    }
+    if entry.get("raw_pinyin") and entry["raw_pinyin"] != entry["pinyin"]:
+        summary["raw_pinyin"] = entry["raw_pinyin"]
+    if entry.get("manual_pinyin_override"):
+        summary["manual_pinyin_override"] = entry["manual_pinyin_override"]
+    return summary
+
+
+def build_state_word_index(state: LexiconState) -> dict[str, LexiconWord]:
+    index: dict[str, LexiconWord] = {}
+    for word in state.sorted_words():
+        key = normalize_field(word.simplified)
+        if key:
+            index[key] = word
+    return index
+
+
+def strip_html_text(value: str) -> str:
+    value = html.unescape(value or "")
+    value = re.sub(r"<[^>]+>", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def definitions_from_meaning_html(value: str) -> list[str]:
+    parts = LI_RE.findall(value or "") or [value]
+    definitions: list[str] = []
+    seen: set[str] = set()
+
+    for part in parts:
+        definition = strip_html_text(part)
+        if not definition or definition in seen:
+            continue
+        definitions.append(definition)
+        seen.add(definition)
+
+    return definitions
+
+
+def build_synthetic_words(missing_entries: list[dict[str, Any]]) -> list[LexiconWord]:
+    by_simplified: dict[str, LexiconWord] = {}
+
+    for entry in missing_entries:
+        simplified = entry["simplified"]
+        word = by_simplified.get(simplified)
+        if word is None:
+            word = LexiconWord(simplified=simplified, tags=["source:xiehanzi"])
+            by_simplified[simplified] = word
+
+        word.add_tags(entry["tags"])
+        word.set_hanzi_frequency_once(entry["frequency"])
+
+        traditional = entry["traditional"]
+        if traditional and traditional not in word.traditional_variants:
+            word.traditional_variants.append(traditional)
+
+        form_key = numbered_pinyin(entry["pinyin"])
+        form = word.forms.get(form_key)
+        if form is None:
+            form = LexiconForm(pinyin=form_key, tags=[])
+            word.forms[form_key] = form
+
+        if traditional and traditional not in form.traditional_variants:
+            form.traditional_variants.append(traditional)
+
+        form.append_definitions(definitions_from_meaning_html(entry["meaning_html"]))
+        form.add_tags(entry["tags"])
+
+    for word in by_simplified.values():
+        word.sort_forms_by_pinyin()
+
+    return sorted(by_simplified.values(), key=lambda word: word.simplified)
+
+
+def prefer_first(values: list[str], value: str) -> None:
+    if not value:
+        return
+    if value in values:
+        values.remove(value)
+    values.insert(0, value)
+
+
+def pinyin_pair_match_type(form_pinyin: str, entry_pinyin: str) -> str | None:
+    best_score = -1
+    best_match_type: str | None = None
+    for form_reading in canonical_pinyin_readings(form_pinyin):
+        for entry_reading in canonical_pinyin_readings(entry_pinyin):
+            if form_reading.lower_compact != entry_reading.lower_compact:
+                continue
+            if form_reading.spaced == entry_reading.spaced:
+                match_type = "exact"
+            elif form_reading.compact == entry_reading.compact:
+                match_type = "format_variant"
+            else:
+                match_type = "case_variant"
+
+            score = match_type_score(match_type)
+            if score > best_score:
+                best_match_type = match_type
+                best_score = score
+    return best_match_type
+
+
+def match_type_score(match_type: str | None) -> int:
+    return {
+        "exact": 100,
+        "format_variant": 90,
+        "case_variant": 80,
+        "reading_variant": 70,
+        "toneless": 60,
+        "created": 0,
+        None: -1,
+    }[match_type]
+
+
+def classify_pinyin_match(form_pinyin: str, entry_pinyin: str) -> str | None:
+    match_type = pinyin_pair_match_type(form_pinyin, entry_pinyin)
+    if not match_type:
+        return None
+    if pinyin_lookup_keys(form_pinyin) != pinyin_lookup_keys(entry_pinyin):
+        return "reading_variant"
+    return match_type
+
+
+def record_form_match(form_stats: dict[str, Any], match_type: str) -> None:
+    form_stats["match_types"][match_type] += 1
+    if match_type == "reading_variant":
+        form_stats["matched_pinyin_variant"] += 1
+
+
+def find_or_create_hanzi_form(
+    word: LexiconWord,
+    entry: dict[str, Any],
+    form_stats: dict[str, Any],
+) -> tuple[LexiconForm, str]:
+    forms = word.sorted_forms()
+    entry_keys = pinyin_lookup_keys(entry["pinyin"])
+
+    matching_forms: list[tuple[LexiconForm, str]] = []
+    for form in forms:
+        match_type = classify_pinyin_match(form.pinyin, entry["pinyin"])
+        if match_type:
+            matching_forms.append((form, match_type))
+
+    if len(matching_forms) > 1:
+        best_match = None
+        best_match_type = None
+        best_score = -1
+
+        for form, match_type in matching_forms:
+            score = match_type_score(match_type)
+            if score > best_score:
+                best_match = form
+                best_match_type = match_type
+                best_score = score
+
+        if best_match and best_match_type:
+            form_stats["matched"] += 1
+            record_form_match(form_stats, best_match_type)
+            return best_match, best_match_type
+
+    for form, match_type in matching_forms:
+        form_stats["matched"] += 1
+        record_form_match(form_stats, match_type)
+        return form, match_type
+
+    entry_toneless_keys = toneless_pinyin_lookup_keys(entry["pinyin"])
+    toneless_matches = [
+        form for form in forms if set(toneless_pinyin_lookup_keys(form.pinyin)).intersection(entry_toneless_keys)
+    ]
+    if len(toneless_matches) == 1:
+        form_stats["matched"] += 1
+        form_stats["matched_toneless"] += 1
+        record_form_match(form_stats, "toneless")
+        return toneless_matches[0], "toneless"
+
+    form = LexiconForm(
+        pinyin=entry["pinyin"],
+        definitions=definitions_from_meaning_html(entry["meaning_html"]),
+        tags=["source:xiehanzi"],
+    )
+    word.add_form(form)
+    word.sort_forms_by_pinyin()
+    form_stats["created"] += 1
+    record_form_match(form_stats, "created")
+    form_stats["created_entries"].append(
+        {
+            "entry": entry_summary(entry),
+            "lookup_key": entry_keys[0] if entry_keys else "",
+            "lookup_keys": entry_keys,
+            "available_form_pinyins": [existing_form.pinyin for existing_form in forms],
+        }
+    )
+    return form, "created"
+
+
+def pinyin_formatting_key(value: str) -> str:
+    return "/".join(reading.compact for reading in canonical_pinyin_readings(value))
+
+
+def apply_reference_pinyin_case(source_pinyin: str, reference_pinyin: str) -> str:
+    reference_by_key = {
+        reading.lower_compact: reading.compact for reading in canonical_pinyin_readings(reference_pinyin)
+    }
+    cased_tokens: list[str] = []
+
+    for source_part in re.split(r"(/)", source_pinyin or ""):
+        if source_part == "/":
+            cased_tokens.append(source_part)
+            continue
+
+        leading_space = re.match(r"\s*", source_part).group(0)
+        trailing_space = re.search(r"\s*$", source_part).group(0)
+        stripped_source = source_part.strip()
+        if not stripped_source:
+            cased_tokens.append(source_part)
+            continue
+
+        numbered_source = numbered_pinyin_part(stripped_source)
+        source_readings = canonical_pinyin_readings(numbered_source)
+        if not source_readings:
+            cased_tokens.append(source_part)
+            continue
+
+        reference_compact = reference_by_key.get(source_readings[0].lower_compact)
+        if not reference_compact:
+            cased_tokens.append(f"{leading_space}{numbered_source}{trailing_space}")
+            continue
+
+        chars = list(numbered_source)
+        reference_index = 0
+        for index, char in enumerate(chars):
+            if PINYIN_SEPARATOR_RE.fullmatch(char):
+                continue
+            if reference_index >= len(reference_compact):
+                break
+
+            reference_char = reference_compact[reference_index]
+            if char.isalpha() and reference_char.isalpha() and char.lower() == reference_char.lower():
+                chars[index] = char.upper() if reference_char.isupper() else char.lower()
+            reference_index += 1
+
+        cased_tokens.append(f"{leading_space}{''.join(chars)}{trailing_space}")
+
+    return "".join(cased_tokens)
+
+
+def numbered_pinyin(value: str) -> str:
+    if re.search(r"\d", value):
+        return normalize_pinyin_u_variants(value)
+    try:
+        return transcriptions.accented_to_numbered(value)
+    except ValueError:
+        return value
+
+
+def non_exact_match_record(
+    entry: dict[str, Any],
+    match_type: str,
+    cc_cedict_pinyin: str | None,
+    cc_cedict_definitions: list[str],
+    xiehanzi_pinyin: str,
+) -> dict[str, Any]:
+    return {
+        "simplified": entry["simplified"],
+        "match_type": match_type,
+        "cc_cedict_pinyin": cc_cedict_pinyin,
+        "xiehanzi_pinyin": xiehanzi_pinyin,
+        "xiehanzi_raw_pinyin": entry.get("raw_pinyin", entry["pinyin"]),
+        "cc_cedict_definitions": cc_cedict_definitions,
+        "xiehanzi_definitions": definitions_from_meaning_html(entry["meaning_html"]),
+    }
+
+
+def normalized_definition_set(definitions: list[str]) -> set[str]:
+    return {re.sub(r"\s+", " ", definition).strip() for definition in definitions if definition.strip()}
+
+
+def definitions_differ(left: list[str], right: list[str]) -> bool:
+    return normalized_definition_set(left) != normalized_definition_set(right)
+
+
+def new_form_stats() -> dict[str, Any]:
+    return {
+        "matched": 0,
+        "matched_pinyin_variant": 0,
+        "matched_toneless": 0,
+        "created": 0,
+        "match_types": {
+            "exact": 0,
+            "format_variant": 0,
+            "case_variant": 0,
+            "reading_variant": 0,
+            "toneless": 0,
+            "created": 0,
+        },
+        "created_entries": [],
+        "non_exact_matches": [],
+        "non_exact_definition_mismatches": [],
+        "pinyin_case_preserved": [],
+        "pinyin_whitespace_only": [],
+        "pinyin_substantive": [],
+    }
+
+
+def pair_source_form_id(item: dict[str, Any]) -> int:
+    return int(item["context"]["source_form_id"])
+
+
+def bucket_source_form_ids(items: list[dict[str, Any]]) -> set[int]:
+    return {pair_source_form_id(item) for item in items}
+
+
+def bucket_matching_pair_count(items: list[dict[str, Any]]) -> int:
+    return sum(1 for item in items if "dictionary" in item)
+
+
+def drop_missing_dictionary_word_source_forms(
+    selected_items: list[dict[str, Any]],
+    remaining_source_form_ids: set[int],
+) -> dict[str, Any]:
+    consumed_source_form_ids = bucket_source_form_ids(selected_items) & remaining_source_form_ids
+    remaining_source_form_ids.difference_update(consumed_source_form_ids)
+    return {
+        "consumed_source_form_ids": consumed_source_form_ids,
+        "consumed_source_form_count": len(consumed_source_form_ids),
+        "consumed_matching_pair_count": 0,
+        "remaining_source_form_count": len(remaining_source_form_ids),
+    }
+
+
+def drop_source_form_pairs(
+    selected_items: list[dict[str, Any]],
+    remaining_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    consumed_source_form_ids = bucket_source_form_ids(selected_items)
+    remaining_after_consumption: list[dict[str, Any]] = []
+    removed_from_remaining_items: list[dict[str, Any]] = []
+
+    for item in remaining_items:
+        if pair_source_form_id(item) in consumed_source_form_ids:
+            removed_from_remaining_items.append(item)
+        else:
+            remaining_after_consumption.append(item)
+
+    return {
+        "consumed_source_form_ids": consumed_source_form_ids,
+        "consumed_source_form_count": len(consumed_source_form_ids),
+        "consumed_matching_pair_count": bucket_matching_pair_count(selected_items)
+        + bucket_matching_pair_count(removed_from_remaining_items),
+        "removed_from_remaining_matching_pair_count": bucket_matching_pair_count(removed_from_remaining_items),
+        "remaining_items": remaining_after_consumption,
+    }
+
+
+def drop_perfect_match_source_form_pairs(
+    selected_items: list[dict[str, Any]],
+    remaining_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return drop_source_form_pairs(selected_items, remaining_items)
+
+
+def drop_manual_pinyin_override_source_form_pairs(
+    selected_items: list[dict[str, Any]],
+    remaining_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return drop_source_form_pairs(selected_items, remaining_items)
+
+
+def apply_legacy_enrichment_fallback_pairs(
+    selected_items: list[dict[str, Any]],
+    remaining_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    _ = remaining_items
+    consumed_source_form_ids = bucket_source_form_ids(selected_items)
+    return {
+        "consumed_source_form_ids": consumed_source_form_ids,
+        "consumed_source_form_count": len(consumed_source_form_ids),
+        "consumed_matching_pair_count": bucket_matching_pair_count(selected_items),
+        "removed_from_remaining_matching_pair_count": 0,
+        "remaining_items": [],
+    }
+
+
+CONSUMPTION_RULES = {
+    "drop_missing_dictionary_word_source_forms": ConsumptionRuleDefinition(
+        name="drop_missing_dictionary_word_source_forms",
+        report_only_effect="remove the source form from the pair pipeline before any pairs are materialized",
+        enrichment_effect="create synthetic words/forms from xiehanzi source entries",
+        handler=drop_missing_dictionary_word_source_forms,
+    ),
+    "drop_perfect_match_source_form_pairs": ConsumptionRuleDefinition(
+        name="drop_perfect_match_source_form_pairs",
+        report_only_effect="remove all remaining matching pairs for the consumed source form",
+        enrichment_effect="apply the legacy-compatible hanzi merge to the selected exact source form",
+        handler=drop_perfect_match_source_form_pairs,
+    ),
+    "drop_manual_pinyin_override_source_form_pairs": ConsumptionRuleDefinition(
+        name="drop_manual_pinyin_override_source_form_pairs",
+        report_only_effect="remove all remaining matching pairs for the manually corrected source form",
+        enrichment_effect="apply the legacy-compatible hanzi merge using the configured corrected Pinyin value",
+        handler=drop_manual_pinyin_override_source_form_pairs,
+    ),
+    "apply_legacy_enrichment_fallback": ConsumptionRuleDefinition(
+        name="apply_legacy_enrichment_fallback",
+        report_only_effect="consume the terminal default_unresolved rest bucket",
+        enrichment_effect="apply the previous hanzi enrichment merge to the remaining source forms",
+        handler=apply_legacy_enrichment_fallback_pairs,
+    ),
+}
+
+
+def attach_deck_entries_to_state(
+    state: LexiconState,
+    deck_entries: list[dict[str, Any]],
+    form_stats: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    word_index = build_state_word_index(state)
+    unmatched: list[dict[str, Any]] = []
+    if form_stats is None:
+        form_stats = new_form_stats()
+
+    for entry in deck_entries:
+        word = word_index.get(normalize_field(entry["simplified"]))
+        if word is None:
+            unmatched.append(entry_summary(entry))
+            continue
+
+        word.add_tags(entry["tags"])
+        word.set_hanzi_frequency_once(entry["frequency"])
+
+        form, match_type = find_or_create_hanzi_form(word, entry, form_stats)
+        cc_cedict_pinyin = None if match_type == "created" else form.pinyin
+        cc_cedict_definitions = [] if match_type == "created" else list(form.definitions)
+        xiehanzi_pinyin = numbered_pinyin(entry["pinyin"])
+        if match_type != "exact":
+            match_record = non_exact_match_record(
+                entry=entry,
+                match_type=match_type,
+                cc_cedict_pinyin=cc_cedict_pinyin,
+                cc_cedict_definitions=cc_cedict_definitions,
+                xiehanzi_pinyin=xiehanzi_pinyin,
+            )
+            form_stats["non_exact_matches"].append(match_record)
+            if match_type != "created" and definitions_differ(
+                match_record["cc_cedict_definitions"], match_record["xiehanzi_definitions"]
+            ):
+                form_stats["non_exact_definition_mismatches"].append(match_record)
+
+        prefer_first(form.traditional_variants, entry["traditional"])
+        form.add_tags(entry["tags"])
+
+        if entry.get("pinyin"):
+            new_pinyin = xiehanzi_pinyin
+            old_pinyin = form.pinyin
+            if old_pinyin and match_type != "created":
+                cased_pinyin = apply_reference_pinyin_case(new_pinyin, str(old_pinyin))
+                if cased_pinyin != new_pinyin:
+                    form_stats["pinyin_case_preserved"].append(
+                        {
+                            "simplified": entry["simplified"],
+                            "cc_cedict_pinyin": old_pinyin,
+                            "xiehanzi_pinyin": new_pinyin,
+                            "merged_pinyin": cased_pinyin,
+                            "match_type": match_type,
+                        }
+                    )
+                    new_pinyin = cased_pinyin
+            if old_pinyin and old_pinyin != new_pinyin and match_type != "created":
+                override_record = {
+                    "simplified": entry["simplified"],
+                    "cc_cedict_pinyin": old_pinyin,
+                    "xiehanzi_pinyin": new_pinyin,
+                    "match_type": match_type,
+                    "cc_cedict_definitions": form.definitions,
+                    "xiehanzi_definitions": definitions_from_meaning_html(entry["meaning_html"]),
+                }
+                if pinyin_formatting_key(str(old_pinyin)) == pinyin_formatting_key(new_pinyin):
+                    form_stats["pinyin_whitespace_only"].append(override_record)
+                else:
+                    form_stats["pinyin_substantive"].append(override_record)
+            form.pinyin = new_pinyin
+
+    return unmatched, form_stats
+
+
+def deck_entries_for_source_form_ids(
+    deck_entries: list[dict[str, Any]], source_form_ids: set[int]
+) -> list[dict[str, Any]]:
+    return [deck_entries[source_form_id] for source_form_id in sorted(source_form_ids)]
+
+
+def deck_entries_with_manual_pinyin_overrides(
+    deck_entries: list[dict[str, Any]],
+    selected_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    overrides_by_source_form_id: dict[int, dict[str, str]] = {}
+    for item in selected_items:
+        override = item["context"].get("manual_pinyin_override")
+        if override is None:
+            raise ValueError(f"Manual Pinyin override bucket item lacks override context: {item!r}")
+        source_form_id = pair_source_form_id(item)
+        if source_form_id in overrides_by_source_form_id:
+            raise ValueError(f"Manual Pinyin override selected multiple pairs for source form {source_form_id}")
+        overrides_by_source_form_id[source_form_id] = override
+
+    entries: list[dict[str, Any]] = []
+    for source_form_id in sorted(overrides_by_source_form_id):
+        override = overrides_by_source_form_id[source_form_id]
+        entry = dict(deck_entries[source_form_id])
+        entry["raw_pinyin"] = override["raw_pinyin"]
+        entry["pinyin"] = override["override_pinyin"]
+        entry["manual_pinyin_override"] = override
+        entries.append(entry)
+    return entries
+
+
+def add_synthetic_words_to_state(state: LexiconState, missing_entries: list[dict[str, Any]]) -> list[LexiconWord]:
+    synthetic_words = build_synthetic_words(missing_entries)
+    for word in synthetic_words:
+        key = word.simplified
+        if key in state.words:
+            raise ValueError(f"Synthetic word collides with existing lexicon word: {key}")
+        state.words[key] = word
+    return synthetic_words
+
+
+def consume_perfect_match_bucket(
+    state: LexiconState,
+    deck_entries: list[dict[str, Any]],
+    pipeline: dict[str, Any],
+    form_stats: dict[str, Any],
+) -> dict[str, Any]:
+    selected_items = pipeline["bucket_results"]["perfect_match"]["selected_items"]
+    selected_source_form_ids = bucket_source_form_ids(selected_items)
+    consumed_entries = deck_entries_for_source_form_ids(deck_entries, selected_source_form_ids)
+    missing_entries, form_stats = attach_deck_entries_to_state(state, consumed_entries, form_stats=form_stats)
+    if missing_entries:
+        raise ValueError(f"Perfect-match consumption lost dictionary targets: {missing_entries!r}")
+
+    return {
+        "entries": [entry_summary(entry) for entry in consumed_entries],
+        "entry_count": len(consumed_entries),
+        "state_effect": "applied the legacy-compatible hanzi merge to selected exact source forms",
+    }
+
+
+def consume_manual_pinyin_override_bucket(
+    state: LexiconState,
+    deck_entries: list[dict[str, Any]],
+    pipeline: dict[str, Any],
+    form_stats: dict[str, Any],
+) -> dict[str, Any]:
+    selected_items = pipeline["bucket_results"]["manual_pinyin_override"]["selected_items"]
+    consumed_entries = deck_entries_with_manual_pinyin_overrides(deck_entries, selected_items)
+    missing_entries, form_stats = attach_deck_entries_to_state(state, consumed_entries, form_stats=form_stats)
+    if missing_entries:
+        raise ValueError(f"Manual Pinyin override consumption lost dictionary targets: {missing_entries!r}")
+
+    return {
+        "entries": [entry_summary(entry) for entry in consumed_entries],
+        "entry_count": len(consumed_entries),
+        "form_stats": form_stats,
+        "state_effect": "applied the legacy-compatible hanzi merge using configured corrected Pinyin values",
+    }
+
+
+def consume_missing_dictionary_word_bucket(
+    state: LexiconState,
+    deck_entries: list[dict[str, Any]],
+    pipeline: dict[str, Any],
+) -> dict[str, Any]:
+    missing_source_form_ids = bucket_source_form_ids(
+        pipeline["bucket_results"]["missing_dictionary_word"]["selected_items"]
+    )
+    missing_entries = deck_entries_for_source_form_ids(deck_entries, missing_source_form_ids)
+    synthetic_words = add_synthetic_words_to_state(state, missing_entries)
+    return {
+        "entries": missing_entries,
+        "entry_count": len(missing_entries),
+        "synthetic_words": synthetic_words,
+        "state_effect": "created synthetic words/forms from xiehanzi source entries",
+    }
+
+
+def consume_default_unresolved_bucket(
+    state: LexiconState,
+    deck_entries: list[dict[str, Any]],
+    pipeline: dict[str, Any],
+    form_stats: dict[str, Any],
+) -> dict[str, Any]:
+    default_source_form_ids = bucket_source_form_ids(pipeline["bucket_results"]["default_unresolved"]["selected_items"])
+    default_entries = deck_entries_for_source_form_ids(deck_entries, default_source_form_ids)
+    missing_deck_after_pipeline, form_stats = attach_deck_entries_to_state(
+        state,
+        default_entries,
+        form_stats=form_stats,
+    )
+    return {
+        "entries": default_entries,
+        "entry_count": len(default_entries),
+        "missing_deck_after_pipeline": missing_deck_after_pipeline,
+        "form_stats": form_stats,
+        "state_effect": "applied the previous hanzi enrichment merge as fallback",
+    }
+
+
+STATE_CONSUMPTION_RULES = {
+    "missing_dictionary_word": StateConsumptionRuleDefinition(
+        name="consume_missing_dictionary_word_bucket",
+        bucket="missing_dictionary_word",
+        state_effect="create synthetic words/forms from xiehanzi source entries",
+        handler=consume_missing_dictionary_word_bucket,
+    ),
+    "perfect_match": StateConsumptionRuleDefinition(
+        name="consume_perfect_match_bucket",
+        bucket="perfect_match",
+        state_effect="apply the legacy-compatible hanzi merge to selected exact source forms",
+        handler=consume_perfect_match_bucket,
+    ),
+    "manual_pinyin_override": StateConsumptionRuleDefinition(
+        name="consume_manual_pinyin_override_bucket",
+        bucket="manual_pinyin_override",
+        state_effect="apply the legacy-compatible hanzi merge using configured corrected Pinyin values",
+        handler=consume_manual_pinyin_override_bucket,
+    ),
+    "default_unresolved": StateConsumptionRuleDefinition(
+        name="consume_default_unresolved_bucket",
+        bucket="default_unresolved",
+        state_effect="apply the previous hanzi enrichment merge as fallback",
+        handler=consume_default_unresolved_bucket,
+    ),
+}
+
+
+def apply_pipeline_enrichment_to_state(
+    state: LexiconState,
+    deck_entries: list[dict[str, Any]],
+    pipeline: dict[str, Any],
+) -> dict[str, Any]:
+    missing_dictionary_word = STATE_CONSUMPTION_RULES["missing_dictionary_word"].handler(
+        state,
+        deck_entries,
+        pipeline,
+    )
+
+    form_stats = new_form_stats()
+    perfect_match_stats = STATE_CONSUMPTION_RULES["perfect_match"].handler(
+        state=state,
+        deck_entries=deck_entries,
+        pipeline=pipeline,
+        form_stats=form_stats,
+    )
+
+    manual_pinyin_override_stats = STATE_CONSUMPTION_RULES["manual_pinyin_override"].handler(
+        state=state,
+        deck_entries=deck_entries,
+        pipeline=pipeline,
+        form_stats=form_stats,
+    )
+    form_stats = manual_pinyin_override_stats["form_stats"]
+
+    default_unresolved = STATE_CONSUMPTION_RULES["default_unresolved"].handler(
+        state,
+        deck_entries,
+        pipeline,
+        form_stats=form_stats,
+    )
+    form_stats = default_unresolved["form_stats"]
+
+    return {
+        "synthetic_words": missing_dictionary_word["synthetic_words"],
+        "missing_dictionary_word": {
+            key: value for key, value in missing_dictionary_word.items() if key != "synthetic_words"
+        },
+        "missing_deck_entries_before_stubs": missing_dictionary_word["entries"],
+        "perfect_match": perfect_match_stats,
+        "manual_pinyin_override": manual_pinyin_override_stats,
+        "default_unresolved": {
+            key: value for key, value in default_unresolved.items() if key not in {"entries", "form_stats"}
+        },
+        "default_fallback_entries": [entry_summary(entry) for entry in default_unresolved["entries"]],
+        "default_fallback_entry_count": default_unresolved["entry_count"],
+        "missing_deck_after_pipeline": default_unresolved["missing_deck_after_pipeline"],
+        "form_stats": form_stats,
+    }

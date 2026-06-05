@@ -16,7 +16,7 @@ import genanki
 from anki_hanzi.audio.generation import AudioGenerator
 from anki_hanzi.deck import DeckConfig
 from anki_hanzi.deck import common
-from anki_hanzi.enrichment.hanzi import (
+from anki_hanzi.enrichment.xiehanzi import (
     DEFAULT_FREQUENCY_LIST,
     DEFAULT_HSK_DATA_DIR,
     DEFAULT_MASTER_DB,
