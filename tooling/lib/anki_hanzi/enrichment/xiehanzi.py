@@ -47,7 +47,6 @@ from anki_hanzi.enrichment.xiehanzi_matching import (
     candidate_count_buckets_for_source_forms,
     materialize_simplified_match_pairs,
     pinyin_counts_for_items,
-    top_candidate_pinyin_counts_for_source_forms,
 )
 
 
@@ -529,10 +528,6 @@ def build_matching_report(
         default_source_form_ids_after_consumption,
     )
     default_pinyin_counts = pinyin_counts_for_items(default_items)
-    default_top_candidate_pinyin_counts = top_candidate_pinyin_counts_for_source_forms(
-        entry_reports_by_id,
-        default_source_form_ids_after_consumption,
-    )
     perfect_match_selected_pair_count = bucket_results["perfect_match"]["selected_matching_pair_count"]
     perfect_match_consumed_pair_count = bucket_results["perfect_match"]["consumed_matching_pair_count"]
 
@@ -727,7 +722,6 @@ def build_matching_report(
             "default_candidate_count_buckets": dict(sorted(default_candidate_count_buckets.items())),
             "initial_matching_pair_pinyin_evidence_counts": dict(sorted(initial_pinyin_counts.items())),
             "default_matching_pair_pinyin_evidence_counts": dict(sorted(default_pinyin_counts.items())),
-            "default_top_candidate_pinyin_evidence_counts": dict(sorted(default_top_candidate_pinyin_counts.items())),
             "bucket_item_limit": bucket_item_limit,
         },
         "priority_pipeline": [priority_pipeline_item(definition) for definition in bucket_definitions_by_priority()],
@@ -783,15 +777,6 @@ def build_matching_report(
                 "missing": "Source or dictionary definitions are missing.",
             },
         },
-        "pinyin_evidence_order": [
-            "exact",
-            "format_variant",
-            "case_variant",
-            "toneless",
-            "reading_overlap",
-            "mismatch",
-            "missing",
-        ],
         "buckets": {definition.name: bucket_report_item(definition) for definition in bucket_definitions_by_priority()},
     }
 

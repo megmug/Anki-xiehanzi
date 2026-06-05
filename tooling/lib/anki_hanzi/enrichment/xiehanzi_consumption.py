@@ -23,6 +23,8 @@ StateConsumptionRuleHandler = Callable[..., dict[str, Any]]
 
 PINYIN_SEPARATOR_RE = re.compile(r"[\s'’\-·]+")
 LI_RE = re.compile(r"<li>(.*?)</li>", re.IGNORECASE | re.DOTALL)
+PINYIN_PAIR_MATCH_PREFERENCE = ("exact", "format_variant", "case_variant")
+FORM_MATCH_PREFERENCE = ("exact", "format_variant", "case_variant", "reading_variant")
 
 
 @dataclass(frozen=True)
@@ -208,8 +210,7 @@ def prefer_first(values: list[str], value: str) -> None:
 
 
 def pinyin_pair_match_type(form_pinyin: str, entry_pinyin: str) -> str | None:
-    best_score = -1
-    best_match_type: str | None = None
+    observed_match_types: set[str] = set()
     for form_reading in canonical_pinyin_readings(form_pinyin):
         for entry_reading in canonical_pinyin_readings(entry_pinyin):
             if form_reading.lower_compact != entry_reading.lower_compact:
@@ -221,23 +222,22 @@ def pinyin_pair_match_type(form_pinyin: str, entry_pinyin: str) -> str | None:
             else:
                 match_type = "case_variant"
 
-            score = match_type_score(match_type)
-            if score > best_score:
-                best_match_type = match_type
-                best_score = score
-    return best_match_type
+            observed_match_types.add(match_type)
+
+    for match_type in PINYIN_PAIR_MATCH_PREFERENCE:
+        if match_type in observed_match_types:
+            return match_type
+    return None
 
 
-def match_type_score(match_type: str | None) -> int:
-    return {
-        "exact": 100,
-        "format_variant": 90,
-        "case_variant": 80,
-        "reading_variant": 70,
-        "toneless": 60,
-        "created": 0,
-        None: -1,
-    }[match_type]
+def choose_preferred_form_match(
+    matching_forms: list[tuple[LexiconForm, str]],
+) -> tuple[LexiconForm, str] | None:
+    for preferred_match_type in FORM_MATCH_PREFERENCE:
+        for form, match_type in matching_forms:
+            if match_type == preferred_match_type:
+                return form, match_type
+    return None
 
 
 def classify_pinyin_match(form_pinyin: str, entry_pinyin: str) -> str | None:
@@ -270,18 +270,9 @@ def find_or_create_hanzi_form(
             matching_forms.append((form, match_type))
 
     if len(matching_forms) > 1:
-        best_match = None
-        best_match_type = None
-        best_score = -1
-
-        for form, match_type in matching_forms:
-            score = match_type_score(match_type)
-            if score > best_score:
-                best_match = form
-                best_match_type = match_type
-                best_score = score
-
-        if best_match and best_match_type:
+        preferred_match = choose_preferred_form_match(matching_forms)
+        if preferred_match:
+            best_match, best_match_type = preferred_match
             form_stats["matched"] += 1
             record_form_match(form_stats, best_match_type)
             return best_match, best_match_type

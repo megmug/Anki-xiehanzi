@@ -22,24 +22,6 @@ PINYIN_SEPARATOR_RE = re.compile(r"[\s'’·-]+")
 LI_RE = re.compile(r"<li>(.*?)</li>", re.IGNORECASE | re.DOTALL)
 WORD_RE = re.compile(r"[a-z0-9]+")
 
-PINYIN_RANK = {
-    "exact": 6,
-    "format_variant": 5,
-    "case_variant": 4,
-    "toneless": 3,
-    "reading_overlap": 2,
-    "mismatch": 1,
-    "missing": 0,
-}
-DEFINITION_RANK = {
-    "exact": 5,
-    "subset": 4,
-    "strong_overlap": 3,
-    "weak_overlap": 2,
-    "none": 1,
-    "missing": 0,
-}
-
 MANUAL_PINYIN_OVERRIDES = {
     ("标致", "7-9"): {
         "pinyin": "biao1zhi5",
@@ -220,31 +202,31 @@ def definition_preview(values: list[str], limit: int = 2) -> list[str]:
     return [preview_text(value) for value in values[:limit]]
 
 
-def classify_definitions(source_definitions: list[str], dictionary_definitions: list[str]) -> tuple[str, float]:
+def classify_definitions(source_definitions: list[str], dictionary_definitions: list[str]) -> str:
     source_normalized = {normalize_definition(definition) for definition in source_definitions}
     dictionary_normalized = {normalize_definition(definition) for definition in dictionary_definitions}
     source_normalized.discard("")
     dictionary_normalized.discard("")
     if not source_normalized or not dictionary_normalized:
-        return "missing", 0.0
+        return "missing"
     if source_normalized & dictionary_normalized:
-        return "exact", 1.0
+        return "exact"
 
     for source in source_normalized:
         for dictionary in dictionary_normalized:
             if source in dictionary or dictionary in source:
-                return "subset", 1.0
+                return "subset"
 
     source_tokens = definition_tokens(source_definitions)
     dictionary_tokens = definition_tokens(dictionary_definitions)
     if not source_tokens or not dictionary_tokens:
-        return "missing", 0.0
+        return "missing"
     overlap = len(source_tokens & dictionary_tokens) / len(source_tokens | dictionary_tokens)
     if overlap >= 0.6:
-        return "strong_overlap", overlap
+        return "strong_overlap"
     if overlap > 0:
-        return "weak_overlap", overlap
-    return "none", 0.0
+        return "weak_overlap"
+    return "none"
 
 
 def source_entry_report(entry: dict[str, Any]) -> dict[str, Any]:
@@ -266,7 +248,7 @@ def source_entry_report(entry: dict[str, Any]) -> dict[str, Any]:
 def candidate_report(entry: dict[str, Any], word: LexiconWord, form: LexiconForm) -> dict[str, Any]:
     pinyin_kind = classify_pinyin(entry["pinyin"], form.pinyin)
     source_definitions = definitions_from_meaning_html(entry["meaning_html"])
-    definition_kind, definition_overlap = classify_definitions(source_definitions, list(form.definitions))
+    definition_kind = classify_definitions(source_definitions, list(form.definitions))
     return {
         "dictionary": {
             "simplified": word.simplified,
@@ -284,7 +266,6 @@ def candidate_report(entry: dict[str, Any], word: LexiconWord, form: LexiconForm
             },
             "definitions": {
                 "kind": definition_kind,
-                "token_overlap": round(definition_overlap, 3),
                 "source_preview": definition_preview(source_definitions),
             },
         },
@@ -297,26 +278,12 @@ def entry_evidence_summary(candidates: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "candidate_count": 0,
             "strict_pinyin_exact_candidate_count": 0,
-            "top_candidate_pinyin_evidence": None,
-            "top_candidate_definition_evidence": None,
         }
 
     return {
         "candidate_count": len(candidates),
         "strict_pinyin_exact_candidate_count": strict_pinyin_exact_count,
-        "top_candidate_pinyin_evidence": candidates[0]["evidence"]["pinyin"]["kind"],
-        "top_candidate_definition_evidence": candidates[0]["evidence"]["definitions"]["kind"],
     }
-
-
-def candidate_sort_key(candidate: dict[str, Any]) -> tuple[int, int, str]:
-    pinyin_kind = candidate["evidence"]["pinyin"]["kind"]
-    definition_kind = candidate["evidence"]["definitions"]["kind"]
-    return (
-        -PINYIN_RANK[pinyin_kind],
-        -DEFINITION_RANK[definition_kind],
-        candidate["dictionary"]["pinyin"],
-    )
 
 
 def normalize_entry_key(value: str) -> str:
@@ -342,8 +309,6 @@ def empty_entry_evidence_summary() -> dict[str, Any]:
     return {
         "candidate_count": 0,
         "strict_pinyin_exact_candidate_count": 0,
-        "top_candidate_pinyin_evidence": None,
-        "top_candidate_definition_evidence": None,
     }
 
 
@@ -376,7 +341,7 @@ def matching_pair_report(
     candidate: dict[str, Any],
     *,
     bucket: str,
-    candidate_rank: int,
+    candidate_index: int,
     matching_rule: str,
 ) -> dict[str, Any]:
     evidence_summary = entry_report["evidence_summary"]
@@ -386,7 +351,7 @@ def matching_pair_report(
         "context": {
             "source_form_id": entry_report["source_form_id"],
             "candidate_count_for_source": evidence_summary["candidate_count"],
-            "candidate_rank_for_source": candidate_rank,
+            "candidate_index_for_source": candidate_index,
             "strict_pinyin_exact_candidate_count_for_source": evidence_summary["strict_pinyin_exact_candidate_count"],
         },
         "evidence": candidate["evidence"],
@@ -411,7 +376,7 @@ def missing_dictionary_word_report(entry_report: dict[str, Any], *, bucket: str,
 def matching_pair_identity(item: dict[str, Any]) -> tuple[int, int] | None:
     if "dictionary" not in item:
         return None
-    return (pair_source_form_id(item), int(item["context"]["candidate_rank_for_source"]))
+    return (pair_source_form_id(item), int(item["context"]["candidate_index_for_source"]))
 
 
 def matching_pair_for_bucket(item: dict[str, Any], *, bucket: str, matching_rule: str) -> dict[str, Any]:
@@ -492,17 +457,16 @@ def materialize_simplified_match_pairs(
         entry = entry_report["entry"]
         target_refs = target_form_index.get(entry_report["source_key"], [])
         candidates = [candidate_report(entry, target.word, target.form) for target in target_refs]
-        candidates.sort(key=candidate_sort_key)
         entry_report["candidates"] = candidates
         entry_report["evidence_summary"] = entry_evidence_summary(candidates)
 
-        for candidate_rank, candidate in enumerate(candidates, start=1):
+        for candidate_index, candidate in enumerate(candidates, start=1):
             working_pairs.append(
                 matching_pair_report(
                     entry_report,
                     candidate,
                     bucket="simplified_match_working_set",
-                    candidate_rank=candidate_rank,
+                    candidate_index=candidate_index,
                     matching_rule="simplified_match",
                 )
             )
@@ -656,18 +620,6 @@ MATCHING_RULES = {
 
 def pinyin_counts_for_items(items: list[dict[str, Any]]) -> Counter[str]:
     return Counter(item["evidence"]["pinyin"]["kind"] for item in items if "evidence" in item)
-
-
-def top_candidate_pinyin_counts_for_source_forms(
-    entry_reports_by_id: dict[int, dict[str, Any]],
-    source_form_ids: set[int],
-) -> Counter[str]:
-    counts: Counter[str] = Counter()
-    for source_form_id in source_form_ids:
-        candidates = entry_reports_by_id[source_form_id]["candidates"]
-        if candidates:
-            counts[candidates[0]["evidence"]["pinyin"]["kind"]] += 1
-    return counts
 
 
 def candidate_count_buckets_for_source_forms(
