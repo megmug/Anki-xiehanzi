@@ -61,6 +61,8 @@ class MatchingRuleDefinition:
 
 @dataclass(frozen=True)
 class TargetFormRef:
+    word_key: str
+    form_key: str
     word: LexiconWord
     form: LexiconForm
 
@@ -245,11 +247,17 @@ def source_entry_report(entry: dict[str, Any]) -> dict[str, Any]:
     return report
 
 
-def candidate_report(entry: dict[str, Any], word: LexiconWord, form: LexiconForm) -> dict[str, Any]:
+def candidate_report(entry: dict[str, Any], target: TargetFormRef) -> dict[str, Any]:
+    word = target.word
+    form = target.form
     pinyin_kind = classify_pinyin(entry["pinyin"], form.pinyin)
     source_definitions = definitions_from_meaning_html(entry["meaning_html"])
     definition_kind = classify_definitions(source_definitions, list(form.definitions))
     return {
+        "target": {
+            "word_key": target.word_key,
+            "form_key": target.form_key,
+        },
         "dictionary": {
             "simplified": word.simplified,
             "pinyin": form.pinyin,
@@ -286,21 +294,20 @@ def entry_evidence_summary(candidates: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def normalize_entry_key(value: str) -> str:
-    value = html.unescape(value or "")
-    value = re.sub(r"<[^>]+>", " ", value)
-    value = unicodedata.normalize("NFC", value)
-    return re.sub(r"\s+", "", value).strip().lower()
+def simplified_matching_key(value: str) -> str:
+    return str(value or "")
 
 
 def build_target_form_index(state: LexiconState) -> dict[str, list[TargetFormRef]]:
     target_form_index: dict[str, list[TargetFormRef]] = {}
-    for word in state.sorted_words():
-        key = normalize_entry_key(word.simplified)
+    for word_key in sorted(state.words):
+        word = state.words[word_key]
+        key = simplified_matching_key(word.simplified)
         if not key:
             continue
         target_form_index.setdefault(key, []).extend(
-            TargetFormRef(word=word, form=form) for form in word.sorted_forms()
+            TargetFormRef(word_key=word_key, form_key=form_key, word=word, form=form)
+            for form_key, form in word.forms.items()
         )
     return target_form_index
 
@@ -315,7 +322,7 @@ def empty_entry_evidence_summary() -> dict[str, Any]:
 def source_matching_entry_report(entry: dict[str, Any], source_form_id: int) -> dict[str, Any]:
     return {
         "source_form_id": source_form_id,
-        "source_key": normalize_entry_key(entry["simplified"]),
+        "source_key": simplified_matching_key(entry["simplified"]),
         "entry": entry,
         "source_entry": source_entry_report(entry),
         "evidence_summary": empty_entry_evidence_summary(),
@@ -347,6 +354,7 @@ def matching_pair_report(
     evidence_summary = entry_report["evidence_summary"]
     return {
         "source": entry_report["source_entry"],
+        "target": candidate["target"],
         "dictionary": candidate["dictionary"],
         "context": {
             "source_form_id": entry_report["source_form_id"],
@@ -456,7 +464,7 @@ def materialize_simplified_match_pairs(
         entry_report = entry_reports_by_id[source_form_id]
         entry = entry_report["entry"]
         target_refs = target_form_index.get(entry_report["source_key"], [])
-        candidates = [candidate_report(entry, target.word, target.form) for target in target_refs]
+        candidates = [candidate_report(entry, target) for target in target_refs]
         entry_report["candidates"] = candidates
         entry_report["evidence_summary"] = entry_evidence_summary(candidates)
 
@@ -541,15 +549,43 @@ def match_strict_pinyin_exact_unique_pairs(
     bucket: str,
     matching_rule: str,
 ) -> dict[str, Any]:
+    return match_unique_pinyin_kind_pairs(
+        working_pairs,
+        bucket=bucket,
+        matching_rule=matching_rule,
+        pinyin_kind="exact",
+    )
+
+
+def match_format_variant_unique_pairs(
+    working_pairs: list[dict[str, Any]],
+    bucket: str,
+    matching_rule: str,
+) -> dict[str, Any]:
+    return match_unique_pinyin_kind_pairs(
+        working_pairs,
+        bucket=bucket,
+        matching_rule=matching_rule,
+        pinyin_kind="format_variant",
+    )
+
+
+def match_unique_pinyin_kind_pairs(
+    working_pairs: list[dict[str, Any]],
+    *,
+    bucket: str,
+    matching_rule: str,
+    pinyin_kind: str,
+) -> dict[str, Any]:
     pairs_by_source_form: dict[int, list[dict[str, Any]]] = {}
     for pair in working_pairs:
         pairs_by_source_form.setdefault(pair_source_form_id(pair), []).append(pair)
 
     selected_pair_ids: set[tuple[int, int]] = set()
     for source_pairs in pairs_by_source_form.values():
-        exact_pairs = [pair for pair in source_pairs if pair["evidence"]["pinyin"]["kind"] == "exact"]
-        if len(exact_pairs) == 1:
-            pair_id = matching_pair_identity(exact_pairs[0])
+        matching_pairs = [pair for pair in source_pairs if pair["evidence"]["pinyin"]["kind"] == pinyin_kind]
+        if len(matching_pairs) == 1:
+            pair_id = matching_pair_identity(matching_pairs[0])
             if pair_id is not None:
                 selected_pair_ids.add(pair_id)
 
@@ -586,14 +622,14 @@ MATCHING_RULES = {
     "missing_dictionary_word": MatchingRuleDefinition(
         name="missing_dictionary_word",
         scope="source_prelude",
-        requires=("No exact normalized Simplified target word exists in CC-CEDICT",),
+        requires=("No exact Simplified target word exists in CC-CEDICT",),
         handler=match_missing_dictionary_word_sources,
     ),
     "strict_pinyin_exact_unique": MatchingRuleDefinition(
         name="strict_pinyin_exact_unique",
         scope="pair_pipeline",
         requires=(
-            "The working set already contains only normalized Simplified-compatible pairs",
+            "The working set already contains only exact Simplified-compatible pairs",
             "Exactly one remaining pair for the source form has complete strict Pinyin-list equality",
         ),
         selected_pair="the unique complete strict Pinyin-list exact pair",
@@ -608,6 +644,17 @@ MATCHING_RULES = {
         ),
         selected_pair="the unique pair targeted by the configured corrected Pinyin value",
         handler=match_manual_pinyin_override_pairs,
+    ),
+    "format_variant_unique": MatchingRuleDefinition(
+        name="format_variant_unique",
+        scope="pair_pipeline",
+        requires=(
+            "The working set already contains only exact Simplified-compatible pairs",
+            "Exactly one remaining pair for the source form has complete compact preserve-case Pinyin-list equality",
+            "The strict Pinyin reading lists differ only by spacing or accent/number formatting",
+        ),
+        selected_pair="the unique complete compact preserve-case Pinyin-list format-variant pair",
+        handler=match_format_variant_unique_pairs,
     ),
     "default_unresolved": MatchingRuleDefinition(
         name="default_unresolved",

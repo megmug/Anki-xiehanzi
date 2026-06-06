@@ -14,7 +14,6 @@ import csv
 import html
 import json
 import re
-import unicodedata
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,7 +32,6 @@ from anki_hanzi.enrichment.frequency import (
 from anki_hanzi.enrichment.xiehanzi_consumption import (
     CONSUMPTION_RULES,
     apply_pipeline_enrichment_to_state,
-    build_state_word_index,
     bucket_matching_pair_count,
     bucket_source_form_ids,
     entry_summary,
@@ -56,7 +54,7 @@ DEFAULT_REPORT = Path("master_db_output/hanzi_enrichment_report.json")
 DEFAULT_MATCHING_REPORT = Path("master_db_output/hanzi_matching_report.json")
 DEFAULT_DECK_INPUTS_DIR = Path("deck_inputs")
 DEFAULT_HSK_DATA_DIR = DEFAULT_DECK_INPUTS_DIR / "hsk-3.0-words-list/New HSK (2025)/Anki xiehanzi"
-HANZI_DEDUPE_KEY = "Simplified + normalized Pinyin"
+HANZI_DEDUPE_KEY = "Simplified + raw Pinyin"
 BUCKET_DESCRIPTIONS = {
     "perfect_match": (
         "A source form has exactly one dictionary candidate with the same complete strict Pinyin reading list. "
@@ -66,9 +64,13 @@ BUCKET_DESCRIPTIONS = {
         "A configured manual Pinyin correction uniquely targets one dictionary candidate. "
         "The source form is resolved with the corrected Pinyin value."
     ),
+    "format_variant_unique": (
+        "A source form has exactly one dictionary candidate whose complete preserve-case Pinyin reading list "
+        "matches after spacing and accent/number formatting differences. The source form is resolved without "
+        "changing dictionary Pinyin or definitions."
+    ),
     "missing_dictionary_word": (
-        "No exact normalized Simplified word exists in CC-CEDICT. "
-        "The source form is resolved by the future synthetic-form rule."
+        "No exact Simplified word exists in CC-CEDICT. The source form is resolved by the future synthetic-form rule."
     ),
     "default_unresolved": (
         "No higher-priority bucket resolved the source form. All remaining candidate pairs are shown for rule design."
@@ -127,6 +129,15 @@ BUCKET_DEFINITIONS = {
         matching_rules=("manual_pinyin_override_unique",),
         consumption_rule="drop_manual_pinyin_override_source_form_pairs",
     ),
+    "format_variant_unique": BucketDefinition(
+        name="format_variant_unique",
+        priority=40,
+        phase="pair_pipeline",
+        description=BUCKET_DESCRIPTIONS["format_variant_unique"],
+        report_items=False,
+        matching_rules=("format_variant_unique",),
+        consumption_rule="drop_format_variant_source_form_pairs",
+    ),
     "default_unresolved": BucketDefinition(
         name="default_unresolved",
         priority=1000,
@@ -139,15 +150,14 @@ BUCKET_DEFINITIONS = {
 }
 
 
-def normalize_field(value: str) -> str:
+def strip_html_field(value: str) -> str:
     value = html.unescape(value or "")
-    value = re.sub(r"<[^>]+>", " ", value)
-    value = unicodedata.normalize("NFC", value)
-    return re.sub(r"\s+", "", value).strip().lower()
+    value = re.sub(r"<[^>]+>", "", value)
+    return value.strip()
 
 
 def dedupe_key(entry: dict[str, Any]) -> tuple[str, str]:
-    return normalize_field(entry["simplified"]), normalize_field(entry["pinyin"])
+    return entry["simplified"], entry["pinyin"]
 
 
 def printable_key(key: tuple[str, str]) -> str:
@@ -194,8 +204,8 @@ def make_entry(
     if len(row) < len(HANZI_FIELDS):
         raise ValueError(f"Expected at least 8 TSV columns in {source_file}:{row_number}, got {len(row)}: {row!r}")
 
-    simplified = row[0]
-    traditional = row[1]
+    simplified = strip_html_field(row[0])
+    traditional = strip_html_field(row[1])
     raw_pinyin = row[2]
     zhuyin = row[3]
     raw_level = row[4]
@@ -738,7 +748,7 @@ def build_matching_report(
                 "source_form_count": materialization_result["source_form_count"],
             },
             "simplified_match_working_set": {
-                "description": "Materialized pairs whose normalized Simplified values match.",
+                "description": "Materialized pairs whose exact Simplified values match.",
                 "matching_rule": "simplified_match",
                 "source_form_count": materialization_result["source_form_count"],
                 "target_form_count": materialization_result["target_form_count"],
@@ -747,15 +757,15 @@ def build_matching_report(
                 "materialized": True,
             },
             "simplified_mismatch": {
-                "description": "Virtual rejected pairs whose normalized Simplified values do not match.",
+                "description": "Virtual rejected pairs whose exact Simplified values do not match.",
                 "matching_rule": "simplified_mismatch",
                 "matching_pair_count": materialization_result["simplified_mismatch_pair_count"],
                 "materialized": False,
             },
         },
         "candidate_generation": {
-            "source_prelude": "missing_dictionary_word removes source forms with no normalized Simplified target key.",
-            "pair_materialization": "simplified_match materializes only normalized Simplified-compatible pairs.",
+            "source_prelude": "missing_dictionary_word removes source forms with no exact Simplified target key.",
+            "pair_materialization": "simplified_match materializes only exact Simplified-compatible pairs.",
             "virtual_rejection": "simplified_mismatch is counted as a virtual aggregate and is not stored as items.",
         },
         "evidence_model": {
@@ -812,7 +822,7 @@ def enrich_state(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     base_snapshot = LexiconBaseSnapshot.from_state(master_state)
     base_words = list(master_state.sorted_words())
-    base_word_index = build_state_word_index(master_state)
+    base_word_index = {word.simplified: word for word in master_state.sorted_words()}
 
     raw_entries = load_hanzi_entries(hsk_data_dir=hsk_data_dir)
     deck_entries, dropped_duplicates = dedupe_entries(raw_entries)
@@ -826,7 +836,7 @@ def enrich_state(
     )
 
     missing_raw_before_stubs = [
-        entry_summary(entry) for entry in raw_entries if normalize_field(entry["simplified"]) not in base_word_index
+        entry_summary(entry) for entry in raw_entries if entry["simplified"] not in base_word_index
     ]
     pipeline_enrichment = apply_pipeline_enrichment_to_state(master_state, deck_entries, matching_pipeline)
     missing_deck_entries_before_stubs = pipeline_enrichment["missing_deck_entries_before_stubs"]
@@ -898,6 +908,11 @@ def enrich_state(
                 for key, value in pipeline_enrichment["manual_pinyin_override"].items()
                 if key not in {"entries", "form_stats"}
             },
+            "format_variant_unique": {
+                key: value
+                for key, value in pipeline_enrichment["format_variant_unique"].items()
+                if key not in {"entries", "form_stats"}
+            },
             "default_unresolved": pipeline_enrichment["default_unresolved"],
         },
         "frequency_enrichment": frequency_enrichment,
@@ -908,6 +923,7 @@ def enrich_state(
             "missing_deck_entries_after_stubs": missing_deck_after_stubs[:25],
             "perfect_match_entries": pipeline_enrichment["perfect_match"]["entries"][:25],
             "manual_pinyin_override_entries": pipeline_enrichment["manual_pinyin_override"]["entries"][:25],
+            "format_variant_unique_entries": pipeline_enrichment["format_variant_unique"]["entries"][:25],
             "default_fallback_entries": pipeline_enrichment["default_fallback_entries"][:25],
             "hanzi_form_stubs": form_stats["created_entries"],
             "hanzi_non_exact_definition_mismatches": form_stats["non_exact_definition_mismatches"],
