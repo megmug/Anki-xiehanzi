@@ -25,7 +25,7 @@ from anki_hanzi.lexicon import (
     LexiconState,
 )
 from anki_hanzi.enrichment.frequency import (
-    DEFAULT_FREQUENCY_LIST,
+    DEFAULT_FREQUENCY_LIST as DEFAULT_FREQUENCY_LIST,
     TOP_FREQUENCY_THRESHOLDS,
     apply_frequency_enrichment_to_state,
 )
@@ -71,14 +71,23 @@ BUCKET_DESCRIPTIONS = {
     "spoken_tone_variant": (
         "A source form has exactly one dictionary candidate whose toneless Pinyin matches. Every tone difference "
         "between source and dictionary Pinyin is fully explained by recognized spoken variants: 一 sandhi, 不 "
-        "sandhi, or neutral-tone differences. The source form is consumed by adding its Pinyin as an accepted "
-        "reading on the selected dictionary form."
+        "sandhi, or neutral-tone differences with matching reading and syllable structure. The source form is "
+        "consumed by adding the source tones in dictionary Pinyin format as an accepted reading on the selected "
+        "dictionary form."
+    ),
+    "case_variant_exact_definition": (
+        "A source form has exactly one dictionary candidate whose Pinyin differs only by case after spacing and "
+        "accent/number normalization, and whose complete normalized definition set matches exactly. The source form "
+        "is resolved by applying tags and metadata to the selected dictionary form without changing dictionary Pinyin "
+        "or definitions."
     ),
     "missing_dictionary_word": (
-        "No exact Simplified word exists in CC-CEDICT. The source form is resolved by the future synthetic-form rule."
+        "No exact Simplified word exists in CC-CEDICT. The source form is resolved by creating synthetic words/forms "
+        "from the xiehanzi source entry."
     ),
     "default_unresolved": (
-        "No higher-priority bucket resolved the source form. All remaining candidate pairs are shown for rule design."
+        "No higher-priority bucket resolved the source form. All remaining candidate pairs are shown for rule design "
+        "and the source form still receives legacy fallback enrichment."
     ),
 }
 
@@ -151,6 +160,15 @@ BUCKET_DEFINITIONS = {
         report_items=False,
         matching_rules=("spoken_tone_variant_unique",),
         consumption_rule="consume_spoken_tone_variant_source_form_pairs",
+    ),
+    "case_variant_exact_definition": BucketDefinition(
+        name="case_variant_exact_definition",
+        priority=60,
+        phase="pair_pipeline",
+        description=BUCKET_DESCRIPTIONS["case_variant_exact_definition"],
+        report_items=False,
+        matching_rules=("case_variant_exact_definition_unique",),
+        consumption_rule="drop_case_variant_exact_definition_source_form_pairs",
     ),
     "default_unresolved": BucketDefinition(
         name="default_unresolved",
@@ -884,6 +902,11 @@ def enrich_state(
                 key: value
                 for key, value in pipeline_enrichment["spoken_tone_variant"].items()
                 if key not in {"added_readings", "entries", "form_stats"}
+            },
+            "case_variant_exact_definition": {
+                key: value
+                for key, value in pipeline_enrichment["case_variant_exact_definition"].items()
+                if key not in {"entries", "form_stats"}
             },
             "default_unresolved": pipeline_enrichment["default_unresolved"],
         },

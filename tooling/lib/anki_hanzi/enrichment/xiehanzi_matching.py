@@ -2,25 +2,26 @@
 
 from __future__ import annotations
 
-import html
 import re
-import unicodedata
 from collections.abc import Callable
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
-from dragonmapper import transcriptions
-
 from anki_hanzi.lexicon import LexiconForm, LexiconState, LexiconWord
+from anki_hanzi.enrichment.xiehanzi_rule_helpers import (
+    definition_sets_exact,
+    definitions_from_meaning_html,
+    normalize_pinyin_u_variants,
+    pinyin_rule_kind as classify_pinyin,
+    pinyin_rule_readings as pinyin_readings,
+)
 from anki_hanzi.enrichment.xiehanzi_consumption import bucket_source_form_ids, pair_source_form_id
 
 
 RuleHandler = Callable[..., dict[str, Any]]
 
-PINYIN_SEPARATOR_RE = re.compile(r"[\s'’·-]+")
 PINYIN_NUMBERED_TOKEN_RE = re.compile(r"[A-Za-züÜv:]+[1-5]?")
-LI_RE = re.compile(r"<li>(.*?)</li>", re.IGNORECASE | re.DOTALL)
 MANUAL_PINYIN_OVERRIDES = {
     ("标致", "7-9"): {
         "pinyin": "biao1zhi5",
@@ -42,14 +43,6 @@ MANUAL_PINYIN_OVERRIDES = {
 
 
 @dataclass(frozen=True)
-class PinyinReading:
-    strict: str
-    compact_preserve_case: str
-    compact_lower: str
-    toneless_lower: str
-
-
-@dataclass(frozen=True)
 class MatchingRuleDefinition:
     name: str
     scope: str
@@ -66,111 +59,8 @@ class TargetFormRef:
     form: LexiconForm
 
 
-def normalize_pinyin_u_variants(value: str) -> str:
-    return value.replace("ü", "v").replace("Ü", "V").replace("u:", "v").replace("U:", "V")
-
-
-def strict_numbered_preserve_case(value: str) -> str:
-    value = unicodedata.normalize("NFC", str(value or "").strip())
-    value = re.sub(r"\s+", " ", value)
-    if not value:
-        return ""
-    if re.search(r"\d", value):
-        numbered = value
-    else:
-        try:
-            numbered = transcriptions.accented_to_numbered(value)
-        except ValueError:
-            numbered = value
-    return normalize_pinyin_u_variants(numbered)
-
-
-def pinyin_readings(value: str) -> list[PinyinReading]:
-    readings: list[PinyinReading] = []
-    for part in re.split(r"/", str(value or "")):
-        strict = strict_numbered_preserve_case(part)
-        if not strict:
-            continue
-        compact_preserve_case = PINYIN_SEPARATOR_RE.sub("", strict)
-        compact_lower = compact_preserve_case.casefold()
-        toneless_lower = re.sub(r"\d", "", compact_lower)
-        readings.append(
-            PinyinReading(
-                strict=strict,
-                compact_preserve_case=compact_preserve_case,
-                compact_lower=compact_lower,
-                toneless_lower=toneless_lower,
-            )
-        )
-    return readings
-
-
-def reading_values(readings: list[PinyinReading], attribute: str) -> list[str]:
-    return [getattr(reading, attribute) for reading in readings]
-
-
-def readings_overlap(source_values: list[str], dictionary_values: list[str]) -> bool:
-    return bool(set(source_values) & set(dictionary_values))
-
-
-def classify_pinyin(source_pinyin: str, dictionary_pinyin: str) -> str:
-    source_readings = pinyin_readings(source_pinyin)
-    dictionary_readings = pinyin_readings(dictionary_pinyin)
-    if not source_readings or not dictionary_readings:
-        return "missing"
-
-    source_strict = reading_values(source_readings, "strict")
-    dictionary_strict = reading_values(dictionary_readings, "strict")
-    if source_strict == dictionary_strict:
-        return "exact"
-
-    source_compact_preserve_case = reading_values(source_readings, "compact_preserve_case")
-    dictionary_compact_preserve_case = reading_values(dictionary_readings, "compact_preserve_case")
-    if source_compact_preserve_case == dictionary_compact_preserve_case:
-        return "format_variant"
-
-    source_compact_lower = reading_values(source_readings, "compact_lower")
-    dictionary_compact_lower = reading_values(dictionary_readings, "compact_lower")
-    if source_compact_lower == dictionary_compact_lower:
-        return "case_variant"
-
-    source_toneless_lower = reading_values(source_readings, "toneless_lower")
-    dictionary_toneless_lower = reading_values(dictionary_readings, "toneless_lower")
-    if source_toneless_lower == dictionary_toneless_lower:
-        return "toneless"
-
-    if (
-        readings_overlap(source_strict, dictionary_strict)
-        or readings_overlap(source_compact_preserve_case, dictionary_compact_preserve_case)
-        or readings_overlap(source_compact_lower, dictionary_compact_lower)
-        or readings_overlap(source_toneless_lower, dictionary_toneless_lower)
-    ):
-        return "reading_overlap"
-
-    return "mismatch"
-
-
 def form_pinyin_reading_string(form: LexiconForm) -> str:
     return " / ".join(form.pinyin_readings or [form.pinyin])
-
-
-def strip_html_text(value: str) -> str:
-    value = html.unescape(value or "")
-    value = re.sub(r"<[^>]+>", " ", value)
-    return re.sub(r"\s+", " ", value).strip()
-
-
-def definitions_from_meaning_html(value: str) -> list[str]:
-    parts = LI_RE.findall(value or "") or [value]
-    definitions: list[str] = []
-    seen: set[str] = set()
-    for part in parts:
-        definition = strip_html_text(part)
-        if not definition or definition in seen:
-            continue
-        definitions.append(definition)
-        seen.add(definition)
-    return definitions
 
 
 def source_entry_report(entry: dict[str, Any]) -> dict[str, Any]:
@@ -410,6 +300,13 @@ def pair_pinyin_kind(pair: dict[str, Any]) -> str:
     return classify_pinyin(pair["source"]["pinyin"], pair["dictionary"]["pinyin"])
 
 
+def pair_definition_sets_exact(pair: dict[str, Any]) -> bool:
+    return definition_sets_exact(
+        list(pair.get("source_definitions", [])),
+        list(pair.get("dictionary", {}).get("definitions", [])),
+    )
+
+
 def match_missing_dictionary_word_sources(
     entry_reports_by_id: dict[int, dict[str, Any]],
     target_form_index: dict[str, list[TargetFormRef]],
@@ -597,6 +494,44 @@ def match_spoken_tone_variant_pairs(
     }
 
 
+def match_case_variant_exact_definition_pairs(
+    working_pairs: list[dict[str, Any]],
+    bucket: str,
+    matching_rule: str,
+) -> dict[str, Any]:
+    pairs_by_source_form: dict[int, list[dict[str, Any]]] = {}
+    for pair in working_pairs:
+        pairs_by_source_form.setdefault(pair_source_form_id(pair), []).append(pair)
+
+    selected_pair_ids: set[tuple[int, int]] = set()
+    for source_pairs in pairs_by_source_form.values():
+        matching_pairs = [
+            pair
+            for pair in source_pairs
+            if pair_pinyin_kind(pair) == "case_variant" and pair_definition_sets_exact(pair)
+        ]
+        if len(matching_pairs) != 1:
+            continue
+        pair_id = matching_pair_identity(matching_pairs[0])
+        if pair_id is not None:
+            selected_pair_ids.add(pair_id)
+
+    selected_items: list[dict[str, Any]] = []
+    remaining_items: list[dict[str, Any]] = []
+    for pair in working_pairs:
+        pair_id = matching_pair_identity(pair)
+        if pair_id in selected_pair_ids:
+            selected_items.append(matching_pair_for_bucket(pair, bucket=bucket, matching_rule=matching_rule))
+        else:
+            remaining_items.append(pair)
+
+    return {
+        "selected_items": selected_items,
+        "remaining_items": remaining_items,
+        "selected_source_form_ids": bucket_source_form_ids(selected_items),
+    }
+
+
 def match_unique_pinyin_kind_pairs(
     working_pairs: list[dict[str, Any]],
     *,
@@ -689,10 +624,23 @@ MATCHING_RULES = {
         requires=(
             "The working set already contains only exact Simplified-compatible pairs",
             "Exactly one remaining pair for the source form has toneless Pinyin equality",
+            "The source and dictionary Pinyin have the same reading count, syllable count, and syllable bases",
             "Every tone difference is explained by recognized spoken variants: 一 sandhi, 不 sandhi, or neutral tone differences",
         ),
         selected_pair="the unique recognized spoken-tone-variant pair",
         handler=match_spoken_tone_variant_pairs,
+    ),
+    "case_variant_exact_definition_unique": MatchingRuleDefinition(
+        name="case_variant_exact_definition_unique",
+        scope="pair_pipeline",
+        requires=(
+            "The working set already contains only exact Simplified-compatible pairs",
+            "Exactly one remaining pair for the source form has complete compact lower-case Pinyin-list equality",
+            "The strict Pinyin reading lists differ only by case after spacing and accent/number normalization",
+            "The complete non-empty normalized source and dictionary definition sets are identical",
+        ),
+        selected_pair="the unique exact-definition case-variant pair",
+        handler=match_case_variant_exact_definition_pairs,
     ),
     "default_unresolved": MatchingRuleDefinition(
         name="default_unresolved",

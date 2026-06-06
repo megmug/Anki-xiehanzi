@@ -16,6 +16,12 @@ from typing import Any
 from dragonmapper import transcriptions
 
 from anki_hanzi.lexicon import LexiconForm, LexiconState, LexiconWord
+from anki_hanzi.enrichment.xiehanzi_rule_helpers import (
+    definition_sets_exact,
+    definitions_from_meaning_html,
+    normalize_pinyin_u_variants,
+    pinyin_rule_kind,
+)
 
 
 ConsumptionRuleHandler = Callable[..., dict[str, Any]]
@@ -23,7 +29,6 @@ StateConsumptionRuleHandler = Callable[..., dict[str, Any]]
 
 PINYIN_SEPARATOR_RE = re.compile(r"[\s'’\-·]+")
 PINYIN_NUMBERED_TOKEN_RE = re.compile(r"[A-Za-züÜv:]+[1-5]?")
-LI_RE = re.compile(r"<li>(.*?)</li>", re.IGNORECASE | re.DOTALL)
 PINYIN_PAIR_MATCH_PREFERENCE = ("exact", "format_variant", "case_variant")
 FORM_MATCH_PREFERENCE = ("exact", "format_variant", "case_variant", "reading_variant")
 
@@ -56,90 +61,6 @@ def normalize_field(value: str) -> str:
     value = re.sub(r"<[^>]+>", " ", value)
     value = unicodedata.normalize("NFC", value)
     return re.sub(r"\s+", "", value).strip().lower()
-
-
-def normalize_pinyin_u_variants(value: str) -> str:
-    return value.replace("ü", "v").replace("Ü", "V").replace("u:", "v").replace("U:", "V")
-
-
-def strict_numbered_preserve_case(value: str) -> str:
-    value = unicodedata.normalize("NFC", str(value or "").strip())
-    value = re.sub(r"\s+", " ", value)
-    if not value:
-        return ""
-    if re.search(r"\d", value):
-        numbered = value
-    else:
-        try:
-            numbered = transcriptions.accented_to_numbered(value)
-        except ValueError:
-            numbered = value
-    return normalize_pinyin_u_variants(numbered)
-
-
-def pinyin_rule_readings(value: str) -> list[dict[str, str]]:
-    readings: list[dict[str, str]] = []
-    for part in re.split(r"/", str(value or "")):
-        strict = strict_numbered_preserve_case(part)
-        if not strict:
-            continue
-        compact_preserve_case = PINYIN_SEPARATOR_RE.sub("", strict)
-        compact_lower = compact_preserve_case.casefold()
-        toneless_lower = re.sub(r"\d", "", compact_lower)
-        readings.append(
-            {
-                "strict": strict,
-                "compact_preserve_case": compact_preserve_case,
-                "compact_lower": compact_lower,
-                "toneless_lower": toneless_lower,
-            }
-        )
-    return readings
-
-
-def pinyin_rule_values(readings: list[dict[str, str]], attribute: str) -> list[str]:
-    return [reading[attribute] for reading in readings]
-
-
-def pinyin_rule_values_overlap(source_values: list[str], dictionary_values: list[str]) -> bool:
-    return bool(set(source_values) & set(dictionary_values))
-
-
-def pinyin_rule_kind(source_pinyin: str, dictionary_pinyin: str) -> str:
-    source_readings = pinyin_rule_readings(source_pinyin)
-    dictionary_readings = pinyin_rule_readings(dictionary_pinyin)
-    if not source_readings or not dictionary_readings:
-        return "missing"
-
-    source_strict = pinyin_rule_values(source_readings, "strict")
-    dictionary_strict = pinyin_rule_values(dictionary_readings, "strict")
-    if source_strict == dictionary_strict:
-        return "exact"
-
-    source_compact_preserve_case = pinyin_rule_values(source_readings, "compact_preserve_case")
-    dictionary_compact_preserve_case = pinyin_rule_values(dictionary_readings, "compact_preserve_case")
-    if source_compact_preserve_case == dictionary_compact_preserve_case:
-        return "format_variant"
-
-    source_compact_lower = pinyin_rule_values(source_readings, "compact_lower")
-    dictionary_compact_lower = pinyin_rule_values(dictionary_readings, "compact_lower")
-    if source_compact_lower == dictionary_compact_lower:
-        return "case_variant"
-
-    source_toneless_lower = pinyin_rule_values(source_readings, "toneless_lower")
-    dictionary_toneless_lower = pinyin_rule_values(dictionary_readings, "toneless_lower")
-    if source_toneless_lower == dictionary_toneless_lower:
-        return "toneless"
-
-    if (
-        pinyin_rule_values_overlap(source_strict, dictionary_strict)
-        or pinyin_rule_values_overlap(source_compact_preserve_case, dictionary_compact_preserve_case)
-        or pinyin_rule_values_overlap(source_compact_lower, dictionary_compact_lower)
-        or pinyin_rule_values_overlap(source_toneless_lower, dictionary_toneless_lower)
-    ):
-        return "reading_overlap"
-
-    return "mismatch"
 
 
 def numbered_pinyin_part(value: str) -> str:
@@ -280,27 +201,6 @@ def build_state_word_index(state: LexiconState) -> dict[str, LexiconWord]:
         if key:
             index[key] = word
     return index
-
-
-def strip_html_text(value: str) -> str:
-    value = html.unescape(value or "")
-    value = re.sub(r"<[^>]+>", " ", value)
-    return re.sub(r"\s+", " ", value).strip()
-
-
-def definitions_from_meaning_html(value: str) -> list[str]:
-    parts = LI_RE.findall(value or "") or [value]
-    definitions: list[str] = []
-    seen: set[str] = set()
-
-    for part in parts:
-        definition = strip_html_text(part)
-        if not definition or definition in seen:
-            continue
-        definitions.append(definition)
-        seen.add(definition)
-
-    return definitions
 
 
 def build_synthetic_words(missing_entries: list[dict[str, Any]]) -> list[LexiconWord]:
@@ -637,6 +537,13 @@ def consume_spoken_tone_variant_source_form_pairs(
     return drop_source_form_pairs(selected_items, remaining_items)
 
 
+def drop_case_variant_exact_definition_source_form_pairs(
+    selected_items: list[dict[str, Any]],
+    remaining_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return drop_source_form_pairs(selected_items, remaining_items)
+
+
 def apply_legacy_enrichment_fallback_pairs(
     selected_items: list[dict[str, Any]],
     remaining_items: list[dict[str, Any]],
@@ -682,6 +589,12 @@ CONSUMPTION_RULES = {
         report_only_effect="remove all remaining matching pairs for the spoken-tone-variant source form",
         enrichment_effect="add the source Pinyin as an accepted reading on the selected dictionary form",
         handler=consume_spoken_tone_variant_source_form_pairs,
+    ),
+    "drop_case_variant_exact_definition_source_form_pairs": ConsumptionRuleDefinition(
+        name="drop_case_variant_exact_definition_source_form_pairs",
+        report_only_effect="remove all remaining matching pairs for the exact-definition case-variant source form",
+        enrichment_effect="apply tags and metadata directly to the selected dictionary form without changing Pinyin",
+        handler=drop_case_variant_exact_definition_source_form_pairs,
     ),
     "apply_legacy_enrichment_fallback": ConsumptionRuleDefinition(
         name="apply_legacy_enrichment_fallback",
@@ -1045,6 +958,35 @@ def consume_spoken_tone_variant_bucket(
     }
 
 
+def consume_case_variant_exact_definition_bucket(
+    state: LexiconState,
+    deck_entries: list[dict[str, Any]],
+    pipeline: dict[str, Any],
+    form_stats: dict[str, Any],
+) -> dict[str, Any]:
+    selected_items = pipeline["bucket_results"]["case_variant_exact_definition"]["selected_items"]
+    consumed_entries: list[dict[str, Any]] = []
+
+    for item in sorted(selected_items, key=pair_source_form_id):
+        word, form, _, _ = target_word_and_form_from_pair(state, item)
+        entry = deck_entry_for_pair(deck_entries, item)
+        if pinyin_rule_kind(entry["pinyin"], form_pinyin_reading_string(form)) != "case_variant":
+            raise ValueError(f"Case-variant bucket selected a non-case-variant pair: {item!r}")
+        if not definition_sets_exact(definitions_from_meaning_html(entry["meaning_html"]), list(form.definitions)):
+            raise ValueError(f"Case-variant bucket selected a non-exact-definition pair: {item!r}")
+        apply_entry_metadata_to_selected_form(word, form, entry)
+        form_stats["matched"] += 1
+        record_form_match(form_stats, "case_variant")
+        consumed_entries.append(entry)
+
+    return {
+        "entries": [entry_summary(entry) for entry in consumed_entries],
+        "entry_count": len(consumed_entries),
+        "form_stats": form_stats,
+        "state_effect": "applied case-variant tags and metadata directly without changing dictionary Pinyin",
+    }
+
+
 def consume_missing_dictionary_word_bucket(
     state: LexiconState,
     deck_entries: list[dict[str, Any]],
@@ -1117,6 +1059,12 @@ STATE_CONSUMPTION_RULES = {
         state_effect="add source Pinyin as accepted readings on selected dictionary forms",
         handler=consume_spoken_tone_variant_bucket,
     ),
+    "case_variant_exact_definition": StateConsumptionRuleDefinition(
+        name="consume_case_variant_exact_definition_bucket",
+        bucket="case_variant_exact_definition",
+        state_effect="apply case-variant tags and metadata directly without changing dictionary Pinyin",
+        handler=consume_case_variant_exact_definition_bucket,
+    ),
     "default_unresolved": StateConsumptionRuleDefinition(
         name="consume_default_unresolved_bucket",
         bucket="default_unresolved",
@@ -1169,6 +1117,14 @@ def apply_pipeline_enrichment_to_state(
     )
     form_stats = spoken_tone_variant["form_stats"]
 
+    case_variant_exact_definition = STATE_CONSUMPTION_RULES["case_variant_exact_definition"].handler(
+        state=state,
+        deck_entries=deck_entries,
+        pipeline=pipeline,
+        form_stats=form_stats,
+    )
+    form_stats = case_variant_exact_definition["form_stats"]
+
     default_unresolved = STATE_CONSUMPTION_RULES["default_unresolved"].handler(
         state,
         deck_entries,
@@ -1187,6 +1143,7 @@ def apply_pipeline_enrichment_to_state(
         "manual_pinyin_override": manual_pinyin_override_stats,
         "format_variant_unique": format_variant_stats,
         "spoken_tone_variant": spoken_tone_variant,
+        "case_variant_exact_definition": case_variant_exact_definition,
         "default_unresolved": {
             key: value for key, value in default_unresolved.items() if key not in {"entries", "form_stats"}
         },
