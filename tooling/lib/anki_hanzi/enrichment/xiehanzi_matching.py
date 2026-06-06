@@ -161,6 +161,10 @@ def pinyin_normalization_report(value: str) -> dict[str, Any]:
     }
 
 
+def form_pinyin_reading_string(form: LexiconForm) -> str:
+    return " / ".join(form.pinyin_readings or [form.pinyin])
+
+
 def strip_html_text(value: str) -> str:
     value = html.unescape(value or "")
     value = re.sub(r"<[^>]+>", " ", value)
@@ -250,7 +254,8 @@ def source_entry_report(entry: dict[str, Any]) -> dict[str, Any]:
 def candidate_report(entry: dict[str, Any], target: TargetFormRef) -> dict[str, Any]:
     word = target.word
     form = target.form
-    pinyin_kind = classify_pinyin(entry["pinyin"], form.pinyin)
+    dictionary_pinyin = form_pinyin_reading_string(form)
+    pinyin_kind = classify_pinyin(entry["pinyin"], dictionary_pinyin)
     source_definitions = definitions_from_meaning_html(entry["meaning_html"])
     definition_kind = classify_definitions(source_definitions, list(form.definitions))
     return {
@@ -260,7 +265,9 @@ def candidate_report(entry: dict[str, Any], target: TargetFormRef) -> dict[str, 
         },
         "dictionary": {
             "simplified": word.simplified,
-            "pinyin": form.pinyin,
+            "pinyin": dictionary_pinyin,
+            "primary_pinyin": form.pinyin,
+            "pinyin_readings": list(form.pinyin_readings),
             "traditional_variants": list(form.traditional_variants),
             "tags": list(form.tags),
             "definitions_preview": definition_preview(list(form.definitions)),
@@ -270,7 +277,7 @@ def candidate_report(entry: dict[str, Any], target: TargetFormRef) -> dict[str, 
             "pinyin": {
                 "kind": pinyin_kind,
                 "source": pinyin_normalization_report(entry["pinyin"]),
-                "dictionary": pinyin_normalization_report(form.pinyin),
+                "dictionary": pinyin_normalization_report(dictionary_pinyin),
             },
             "definitions": {
                 "kind": definition_kind,

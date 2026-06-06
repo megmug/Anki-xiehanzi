@@ -610,7 +610,7 @@ def attach_deck_entries_to_state(
                     form_stats["pinyin_whitespace_only"].append(override_record)
                 else:
                     form_stats["pinyin_substantive"].append(override_record)
-            form.pinyin = new_pinyin
+            form.replace_pinyin(new_pinyin)
 
     return unmatched, form_stats
 
@@ -681,7 +681,7 @@ def rekey_form(
     new_pinyin: str,
 ) -> str:
     new_key = unique_form_key(word, new_pinyin, current_key)
-    form.pinyin = new_pinyin
+    form.replace_pinyin(new_pinyin)
     if new_key == current_key:
         return current_key
 
