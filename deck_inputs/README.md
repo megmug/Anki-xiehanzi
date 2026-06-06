@@ -62,8 +62,6 @@ Common selection tags:
 - `freq:top500`
 - `freq:top2500`
 - `freq:top10000`
-- `source:xiehanzi`
-- `source:cc-cedict`
 
 `selection.individual_simplified` is an optional list of Simplified words that are always included.
 It is useful for adding a few specific words without broadening the tag selection.

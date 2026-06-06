@@ -259,6 +259,10 @@ def _is_form_selected(
     return False
 
 
+def _note_tags(tags: set[str]) -> tuple[str, ...]:
+    return tuple(sorted(tag for tag in tags if not tag.startswith("source:")))
+
+
 def _selected_reading_groups(
     word: LexiconWord,
     forms: list[LexiconForm],
@@ -404,7 +408,7 @@ def build_entries_from_state(
                 audio_filename_primary=audio_filename_primary,
                 audio_filename_secondary=audio_filename_secondary,
                 note_pinyin="",
-                tags=tuple(sorted(_word_tags(word, forms) | {"source:xiehanzi"})),
+                tags=_note_tags(_word_tags(word, forms)),
             )
             pinyin_entries.append(word_level_entry)
             write_entries.append(word_level_entry)
@@ -434,7 +438,7 @@ def build_entries_from_state(
                 meaning_definition_html=render_meaning_group(word, list(reading_group.forms)),
                 audio_filename_primary=audio_filename_primary,
                 audio_filename_secondary=audio_filename_secondary,
-                tags=tuple(sorted(set(reading_group.tags) | {"source:xiehanzi"})),
+                tags=_note_tags(set(reading_group.tags)),
             )
             meaning_entries.append(entry)
             word_entry_count += 1
