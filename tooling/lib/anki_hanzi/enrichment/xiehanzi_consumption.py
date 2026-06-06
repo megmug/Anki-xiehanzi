@@ -485,6 +485,13 @@ def drop_manual_pinyin_override_source_form_pairs(
     return drop_source_form_pairs(selected_items, remaining_items)
 
 
+def drop_format_variant_source_form_pairs(
+    selected_items: list[dict[str, Any]],
+    remaining_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return drop_source_form_pairs(selected_items, remaining_items)
+
+
 def apply_legacy_enrichment_fallback_pairs(
     selected_items: list[dict[str, Any]],
     remaining_items: list[dict[str, Any]],
@@ -510,14 +517,20 @@ CONSUMPTION_RULES = {
     "drop_perfect_match_source_form_pairs": ConsumptionRuleDefinition(
         name="drop_perfect_match_source_form_pairs",
         report_only_effect="remove all remaining matching pairs for the consumed source form",
-        enrichment_effect="apply the legacy-compatible hanzi merge to the selected exact source form",
+        enrichment_effect="apply exact-pair tags and metadata directly to the selected dictionary form",
         handler=drop_perfect_match_source_form_pairs,
     ),
     "drop_manual_pinyin_override_source_form_pairs": ConsumptionRuleDefinition(
         name="drop_manual_pinyin_override_source_form_pairs",
         report_only_effect="remove all remaining matching pairs for the manually corrected source form",
-        enrichment_effect="apply the legacy-compatible hanzi merge using the configured corrected Pinyin value",
+        enrichment_effect="apply the configured Pinyin override directly to the selected dictionary form",
         handler=drop_manual_pinyin_override_source_form_pairs,
+    ),
+    "drop_format_variant_source_form_pairs": ConsumptionRuleDefinition(
+        name="drop_format_variant_source_form_pairs",
+        report_only_effect="remove all remaining matching pairs for the format-variant source form",
+        enrichment_effect="apply tags and metadata directly to the selected dictionary form without changing Pinyin",
+        handler=drop_format_variant_source_form_pairs,
     ),
     "apply_legacy_enrichment_fallback": ConsumptionRuleDefinition(
         name="apply_legacy_enrichment_fallback",
@@ -608,29 +621,85 @@ def deck_entries_for_source_form_ids(
     return [deck_entries[source_form_id] for source_form_id in sorted(source_form_ids)]
 
 
-def deck_entries_with_manual_pinyin_overrides(
-    deck_entries: list[dict[str, Any]],
-    selected_items: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    overrides_by_source_form_id: dict[int, dict[str, str]] = {}
-    for item in selected_items:
-        override = item["context"].get("manual_pinyin_override")
-        if override is None:
-            raise ValueError(f"Manual Pinyin override bucket item lacks override context: {item!r}")
-        source_form_id = pair_source_form_id(item)
-        if source_form_id in overrides_by_source_form_id:
-            raise ValueError(f"Manual Pinyin override selected multiple pairs for source form {source_form_id}")
-        overrides_by_source_form_id[source_form_id] = override
+def deck_entry_for_pair(deck_entries: list[dict[str, Any]], item: dict[str, Any]) -> dict[str, Any]:
+    return deck_entries[pair_source_form_id(item)]
 
-    entries: list[dict[str, Any]] = []
-    for source_form_id in sorted(overrides_by_source_form_id):
-        override = overrides_by_source_form_id[source_form_id]
-        entry = dict(deck_entries[source_form_id])
-        entry["raw_pinyin"] = override["raw_pinyin"]
-        entry["pinyin"] = override["override_pinyin"]
-        entry["manual_pinyin_override"] = override
-        entries.append(entry)
-    return entries
+
+def deck_entry_with_manual_pinyin_override(deck_entries: list[dict[str, Any]], item: dict[str, Any]) -> dict[str, Any]:
+    override = item["context"].get("manual_pinyin_override")
+    if override is None:
+        raise ValueError(f"Manual Pinyin override bucket item lacks override context: {item!r}")
+
+    entry = dict(deck_entry_for_pair(deck_entries, item))
+    entry["raw_pinyin"] = override["raw_pinyin"]
+    entry["pinyin"] = override["override_pinyin"]
+    entry["manual_pinyin_override"] = override
+    return entry
+
+
+def target_word_and_form_from_pair(
+    state: LexiconState,
+    item: dict[str, Any],
+) -> tuple[LexiconWord, LexiconForm, str, str]:
+    target = item.get("target")
+    if not isinstance(target, dict):
+        raise ValueError(f"Matching pair lacks target identity: {item!r}")
+
+    word_key = str(target.get("word_key") or "")
+    form_key = str(target.get("form_key") or "")
+    word = state.words.get(word_key)
+    if word is None:
+        raise ValueError(f"Target word no longer exists in state: {target!r}")
+
+    form = word.forms.get(form_key)
+    if form is None:
+        raise ValueError(f"Target form no longer exists in state: {target!r}")
+
+    return word, form, word_key, form_key
+
+
+def apply_entry_metadata_to_selected_form(word: LexiconWord, form: LexiconForm, entry: dict[str, Any]) -> None:
+    word.add_tags(entry["tags"])
+    word.set_hanzi_frequency_once(entry["frequency"])
+    prefer_first(form.traditional_variants, entry["traditional"])
+    form.add_tags(entry["tags"])
+
+
+def unique_form_key(word: LexiconWord, desired_key: str, current_key: str) -> str:
+    key = desired_key
+    index = 1
+    while key in word.forms and key != current_key:
+        key = f"{desired_key}#{index}"
+        index += 1
+    return key
+
+
+def rekey_form(
+    word: LexiconWord,
+    current_key: str,
+    form: LexiconForm,
+    new_pinyin: str,
+) -> str:
+    new_key = unique_form_key(word, new_pinyin, current_key)
+    form.pinyin = new_pinyin
+    if new_key == current_key:
+        return current_key
+
+    rebuilt_forms: dict[str, LexiconForm] = {}
+    replaced = False
+    for key, value in word.forms.items():
+        if key == current_key:
+            if value is not form:
+                raise ValueError(f"Target form key points at a different form: {current_key!r}")
+            rebuilt_forms[new_key] = form
+            replaced = True
+        else:
+            rebuilt_forms[key] = value
+
+    if not replaced:
+        raise ValueError(f"Target form key disappeared before rekey: {current_key!r}")
+    word.forms = rebuilt_forms
+    return new_key
 
 
 def add_synthetic_words_to_state(state: LexiconState, missing_entries: list[dict[str, Any]]) -> list[LexiconWord]:
@@ -650,16 +719,23 @@ def consume_perfect_match_bucket(
     form_stats: dict[str, Any],
 ) -> dict[str, Any]:
     selected_items = pipeline["bucket_results"]["perfect_match"]["selected_items"]
-    selected_source_form_ids = bucket_source_form_ids(selected_items)
-    consumed_entries = deck_entries_for_source_form_ids(deck_entries, selected_source_form_ids)
-    missing_entries, form_stats = attach_deck_entries_to_state(state, consumed_entries, form_stats=form_stats)
-    if missing_entries:
-        raise ValueError(f"Perfect-match consumption lost dictionary targets: {missing_entries!r}")
+    consumed_entries: list[dict[str, Any]] = []
+
+    for item in sorted(selected_items, key=pair_source_form_id):
+        if item["evidence"]["pinyin"]["kind"] != "exact":
+            raise ValueError(f"Perfect-match bucket selected a non-exact pair: {item!r}")
+
+        word, form, _, _ = target_word_and_form_from_pair(state, item)
+        entry = deck_entry_for_pair(deck_entries, item)
+        apply_entry_metadata_to_selected_form(word, form, entry)
+        form_stats["matched"] += 1
+        record_form_match(form_stats, "exact")
+        consumed_entries.append(entry)
 
     return {
         "entries": [entry_summary(entry) for entry in consumed_entries],
         "entry_count": len(consumed_entries),
-        "state_effect": "applied the legacy-compatible hanzi merge to selected exact source forms",
+        "state_effect": "applied exact-pair tags and metadata directly to the selected dictionary forms",
     }
 
 
@@ -670,16 +746,102 @@ def consume_manual_pinyin_override_bucket(
     form_stats: dict[str, Any],
 ) -> dict[str, Any]:
     selected_items = pipeline["bucket_results"]["manual_pinyin_override"]["selected_items"]
-    consumed_entries = deck_entries_with_manual_pinyin_overrides(deck_entries, selected_items)
-    missing_entries, form_stats = attach_deck_entries_to_state(state, consumed_entries, form_stats=form_stats)
-    if missing_entries:
-        raise ValueError(f"Manual Pinyin override consumption lost dictionary targets: {missing_entries!r}")
+    consumed_entries: list[dict[str, Any]] = []
+
+    for item in sorted(selected_items, key=pair_source_form_id):
+        word, form, _, form_key = target_word_and_form_from_pair(state, item)
+        entry = deck_entry_with_manual_pinyin_override(deck_entries, item)
+        old_pinyin = form.pinyin
+        match_type = classify_pinyin_match(old_pinyin, entry["pinyin"])
+        if match_type not in {"exact", "format_variant"}:
+            raise ValueError(f"Manual Pinyin override no longer matches the selected target form: {item!r}")
+
+        word.add_tags(entry["tags"])
+        word.set_hanzi_frequency_once(entry["frequency"])
+        form_stats["matched"] += 1
+        record_form_match(form_stats, match_type)
+
+        xiehanzi_pinyin = numbered_pinyin(entry["pinyin"])
+        if match_type != "exact":
+            match_record = non_exact_match_record(
+                entry=entry,
+                match_type=match_type,
+                cc_cedict_pinyin=old_pinyin,
+                cc_cedict_definitions=list(form.definitions),
+                xiehanzi_pinyin=xiehanzi_pinyin,
+            )
+            form_stats["non_exact_matches"].append(match_record)
+            if definitions_differ(match_record["cc_cedict_definitions"], match_record["xiehanzi_definitions"]):
+                form_stats["non_exact_definition_mismatches"].append(match_record)
+
+        prefer_first(form.traditional_variants, entry["traditional"])
+        form.add_tags(entry["tags"])
+
+        new_pinyin = xiehanzi_pinyin
+        cased_pinyin = apply_reference_pinyin_case(new_pinyin, str(old_pinyin))
+        if cased_pinyin != new_pinyin:
+            form_stats["pinyin_case_preserved"].append(
+                {
+                    "simplified": entry["simplified"],
+                    "cc_cedict_pinyin": old_pinyin,
+                    "xiehanzi_pinyin": new_pinyin,
+                    "merged_pinyin": cased_pinyin,
+                    "match_type": match_type,
+                }
+            )
+            new_pinyin = cased_pinyin
+
+        if old_pinyin and old_pinyin != new_pinyin:
+            override_record = {
+                "simplified": entry["simplified"],
+                "cc_cedict_pinyin": old_pinyin,
+                "xiehanzi_pinyin": new_pinyin,
+                "match_type": match_type,
+                "cc_cedict_definitions": form.definitions,
+                "xiehanzi_definitions": definitions_from_meaning_html(entry["meaning_html"]),
+            }
+            if pinyin_formatting_key(str(old_pinyin)) == pinyin_formatting_key(new_pinyin):
+                form_stats["pinyin_whitespace_only"].append(override_record)
+            else:
+                form_stats["pinyin_substantive"].append(override_record)
+
+        new_form_key = rekey_form(word, form_key, form, new_pinyin)
+        item["target"] = {**item["target"], "form_key": new_form_key}
+        consumed_entries.append(entry)
 
     return {
         "entries": [entry_summary(entry) for entry in consumed_entries],
         "entry_count": len(consumed_entries),
         "form_stats": form_stats,
-        "state_effect": "applied the legacy-compatible hanzi merge using configured corrected Pinyin values",
+        "state_effect": "applied configured Pinyin overrides directly to the selected dictionary forms",
+    }
+
+
+def consume_format_variant_bucket(
+    state: LexiconState,
+    deck_entries: list[dict[str, Any]],
+    pipeline: dict[str, Any],
+    form_stats: dict[str, Any],
+) -> dict[str, Any]:
+    selected_items = pipeline["bucket_results"]["format_variant_unique"]["selected_items"]
+    consumed_entries: list[dict[str, Any]] = []
+
+    for item in sorted(selected_items, key=pair_source_form_id):
+        if item["evidence"]["pinyin"]["kind"] != "format_variant":
+            raise ValueError(f"Format-variant bucket selected a non-format-variant pair: {item!r}")
+
+        word, form, _, _ = target_word_and_form_from_pair(state, item)
+        entry = deck_entry_for_pair(deck_entries, item)
+        apply_entry_metadata_to_selected_form(word, form, entry)
+        form_stats["matched"] += 1
+        record_form_match(form_stats, "format_variant")
+        consumed_entries.append(entry)
+
+    return {
+        "entries": [entry_summary(entry) for entry in consumed_entries],
+        "entry_count": len(consumed_entries),
+        "form_stats": form_stats,
+        "state_effect": "applied format-variant tags and metadata directly without changing dictionary Pinyin",
     }
 
 
@@ -733,14 +895,20 @@ STATE_CONSUMPTION_RULES = {
     "perfect_match": StateConsumptionRuleDefinition(
         name="consume_perfect_match_bucket",
         bucket="perfect_match",
-        state_effect="apply the legacy-compatible hanzi merge to selected exact source forms",
+        state_effect="apply exact-pair tags and metadata directly to selected dictionary forms",
         handler=consume_perfect_match_bucket,
     ),
     "manual_pinyin_override": StateConsumptionRuleDefinition(
         name="consume_manual_pinyin_override_bucket",
         bucket="manual_pinyin_override",
-        state_effect="apply the legacy-compatible hanzi merge using configured corrected Pinyin values",
+        state_effect="apply configured Pinyin overrides directly to selected dictionary forms",
         handler=consume_manual_pinyin_override_bucket,
+    ),
+    "format_variant_unique": StateConsumptionRuleDefinition(
+        name="consume_format_variant_bucket",
+        bucket="format_variant_unique",
+        state_effect="apply format-variant tags and metadata directly without changing dictionary Pinyin",
+        handler=consume_format_variant_bucket,
     ),
     "default_unresolved": StateConsumptionRuleDefinition(
         name="consume_default_unresolved_bucket",
@@ -778,6 +946,14 @@ def apply_pipeline_enrichment_to_state(
     )
     form_stats = manual_pinyin_override_stats["form_stats"]
 
+    format_variant_stats = STATE_CONSUMPTION_RULES["format_variant_unique"].handler(
+        state=state,
+        deck_entries=deck_entries,
+        pipeline=pipeline,
+        form_stats=form_stats,
+    )
+    form_stats = format_variant_stats["form_stats"]
+
     default_unresolved = STATE_CONSUMPTION_RULES["default_unresolved"].handler(
         state,
         deck_entries,
@@ -794,6 +970,7 @@ def apply_pipeline_enrichment_to_state(
         "missing_deck_entries_before_stubs": missing_dictionary_word["entries"],
         "perfect_match": perfect_match_stats,
         "manual_pinyin_override": manual_pinyin_override_stats,
+        "format_variant_unique": format_variant_stats,
         "default_unresolved": {
             key: value for key, value in default_unresolved.items() if key not in {"entries", "form_stats"}
         },
