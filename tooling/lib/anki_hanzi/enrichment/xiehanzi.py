@@ -69,6 +69,12 @@ BUCKET_DESCRIPTIONS = {
         "matches after spacing and accent/number formatting differences. The source form is resolved without "
         "changing dictionary Pinyin or definitions."
     ),
+    "spoken_tone_variant": (
+        "A source form has exactly one dictionary candidate whose toneless Pinyin matches. Every tone difference "
+        "between source and dictionary Pinyin is fully explained by recognized spoken variants: 一 sandhi, 不 "
+        "sandhi, or neutral-tone differences. The source form is consumed by adding its Pinyin as an accepted "
+        "reading on the selected dictionary form."
+    ),
     "missing_dictionary_word": (
         "No exact Simplified word exists in CC-CEDICT. The source form is resolved by the future synthetic-form rule."
     ),
@@ -125,7 +131,7 @@ BUCKET_DEFINITIONS = {
         priority=30,
         phase="pair_pipeline",
         description=BUCKET_DESCRIPTIONS["manual_pinyin_override"],
-        report_items=True,
+        report_items=False,
         matching_rules=("manual_pinyin_override_unique",),
         consumption_rule="drop_manual_pinyin_override_source_form_pairs",
     ),
@@ -137,6 +143,15 @@ BUCKET_DEFINITIONS = {
         report_items=False,
         matching_rules=("format_variant_unique",),
         consumption_rule="drop_format_variant_source_form_pairs",
+    ),
+    "spoken_tone_variant": BucketDefinition(
+        name="spoken_tone_variant",
+        priority=50,
+        phase="pair_pipeline",
+        description=BUCKET_DESCRIPTIONS["spoken_tone_variant"],
+        report_items=False,
+        matching_rules=("spoken_tone_variant_unique",),
+        consumption_rule="consume_spoken_tone_variant_source_form_pairs",
     ),
     "default_unresolved": BucketDefinition(
         name="default_unresolved",
@@ -665,7 +680,7 @@ def build_matching_report(
     def bucket_report_item(definition: BucketDefinition) -> dict[str, Any]:
         bucket = definition.name
         result = bucket_result(definition)
-        return {
+        item = {
             "phase": definition.phase,
             "description": definition.description,
             "matching_rules": [matching_rule_report(rule_name) for rule_name in definition.matching_rules],
@@ -682,8 +697,10 @@ def build_matching_report(
             "remaining_source_form_count_after_step": result["remaining_source_form_count_after_consumption"],
             "remaining_matching_pair_count_after_step": result["remaining_matching_pair_count_after_consumption"],
             "reports_items": definition.report_items,
-            "items": report_bucket_items(bucket),
         }
+        if definition.report_items:
+            item["items"] = report_bucket_items(bucket)
+        return item
 
     return {
         "schema": "hanzi-matching-report-v1",
@@ -692,7 +709,8 @@ def build_matching_report(
             "Diagnostic xiehanzi-to-CC-CEDICT matching pipeline. "
             "Source prelude rules consume source forms before the pair pipeline starts. "
             "Pair rules then split a shrinking working set before consumption removes source-form redundancies. "
-            "Only default_unresolved contains detailed remaining matching pairs."
+            "All buckets include overview counts; only default_unresolved contains detailed matching pairs for rule "
+            "design."
         ),
         "summary": {
             "raw_source_entries": len(raw_entries),
@@ -871,6 +889,7 @@ def enrich_state(
         "hanzi_form_format_variant_matches": form_stats["match_types"]["format_variant"],
         "hanzi_form_case_variant_matches": form_stats["match_types"]["case_variant"],
         "hanzi_form_reading_variant_matches": form_stats["match_types"]["reading_variant"],
+        "hanzi_form_spoken_tone_variant_matches": form_stats["match_types"]["spoken_tone_variant"],
         "hanzi_form_pinyin_variant_matches": form_stats["matched_pinyin_variant"],
         "hanzi_form_toneless_matches": form_stats["matched_toneless"],
         "hanzi_form_stubs_created": form_stats["created"],
@@ -912,6 +931,11 @@ def enrich_state(
                 key: value
                 for key, value in pipeline_enrichment["format_variant_unique"].items()
                 if key not in {"entries", "form_stats"}
+            },
+            "spoken_tone_variant": {
+                key: value
+                for key, value in pipeline_enrichment["spoken_tone_variant"].items()
+                if key not in {"added_readings", "entries", "form_stats"}
             },
             "default_unresolved": pipeline_enrichment["default_unresolved"],
         },

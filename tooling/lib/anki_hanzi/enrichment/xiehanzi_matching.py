@@ -19,6 +19,7 @@ from anki_hanzi.enrichment.xiehanzi_consumption import bucket_source_form_ids, p
 RuleHandler = Callable[..., dict[str, Any]]
 
 PINYIN_SEPARATOR_RE = re.compile(r"[\s'’·-]+")
+PINYIN_NUMBERED_TOKEN_RE = re.compile(r"[A-Za-züÜv:]+[1-5]?")
 LI_RE = re.compile(r"<li>(.*?)</li>", re.IGNORECASE | re.DOTALL)
 WORD_RE = re.compile(r"[a-z0-9]+")
 
@@ -442,6 +443,77 @@ def matching_pair_with_manual_pinyin_override(
     return pair
 
 
+def numbered_pinyin_tokens(value: str) -> list[tuple[str, str]]:
+    tokens: list[tuple[str, str]] = []
+    for token in PINYIN_NUMBERED_TOKEN_RE.findall(value or ""):
+        match = re.match(r"(.+?)([1-5])?$", token)
+        if match is None:
+            continue
+        base = normalize_pinyin_u_variants(match.group(1)).casefold()
+        tone = match.group(2) or ""
+        tokens.append((base, tone))
+    return tokens
+
+
+def spoken_tone_variant_kinds(source_pinyin: str, dictionary_pinyin: str) -> tuple[str, ...]:
+    kinds: set[str] = set()
+    source_readings = pinyin_readings(source_pinyin)
+    dictionary_readings = pinyin_readings(dictionary_pinyin)
+    if len(source_readings) != len(dictionary_readings):
+        return ()
+
+    for source_reading, dictionary_reading in zip(source_readings, dictionary_readings):
+        source_tokens = numbered_pinyin_tokens(source_reading.strict)
+        dictionary_tokens = numbered_pinyin_tokens(dictionary_reading.strict)
+        if len(source_tokens) != len(dictionary_tokens):
+            return ()
+
+        for (source_base, source_tone), (dictionary_base, dictionary_tone) in zip(
+            source_tokens,
+            dictionary_tokens,
+        ):
+            if source_base != dictionary_base:
+                return ()
+            if source_tone == dictionary_tone:
+                continue
+            if source_base == "yi" and source_tone in {"2", "4"} and dictionary_tone == "1":
+                kinds.add("yi_sandhi")
+                continue
+            if source_base == "bu" and source_tone == "2" and dictionary_tone == "4":
+                kinds.add("bu_sandhi")
+                continue
+            if {source_tone, dictionary_tone} & {"5"} and source_tone != dictionary_tone:
+                kinds.add("neutral_tone_diff")
+                continue
+            return ()
+
+    return tuple(sorted(kinds))
+
+
+def matching_pair_with_spoken_tone_variant(
+    item: dict[str, Any],
+    kinds: tuple[str, ...],
+    *,
+    bucket: str,
+    matching_rule: str,
+) -> dict[str, Any]:
+    pair = matching_pair_for_bucket(item, bucket=bucket, matching_rule=matching_rule)
+    pair["context"] = {
+        **pair["context"],
+        "spoken_tone_variant": {
+            "kinds": list(kinds),
+        },
+    }
+    pair["evidence"] = {
+        **pair["evidence"],
+        "spoken_tone_variant": {
+            "kind": "recognized",
+            "kinds": list(kinds),
+        },
+    }
+    return pair
+
+
 def match_missing_dictionary_word_sources(
     entry_reports_by_id: dict[int, dict[str, Any]],
     target_form_index: dict[str, list[TargetFormRef]],
@@ -577,6 +649,58 @@ def match_format_variant_unique_pairs(
     )
 
 
+def match_spoken_tone_variant_pairs(
+    working_pairs: list[dict[str, Any]],
+    bucket: str,
+    matching_rule: str,
+) -> dict[str, Any]:
+    pairs_by_source_form: dict[int, list[dict[str, Any]]] = {}
+    for pair in working_pairs:
+        pairs_by_source_form.setdefault(pair_source_form_id(pair), []).append(pair)
+
+    selected_pair_ids: set[tuple[int, int]] = set()
+    kinds_by_pair_id: dict[tuple[int, int], tuple[str, ...]] = {}
+    for source_pairs in pairs_by_source_form.values():
+        matching_pairs: list[tuple[dict[str, Any], tuple[str, ...]]] = []
+        for pair in source_pairs:
+            if pair["evidence"]["pinyin"]["kind"] != "toneless":
+                continue
+            kinds = spoken_tone_variant_kinds(pair["source"]["pinyin"], pair["dictionary"]["pinyin"])
+            if kinds:
+                matching_pairs.append((pair, kinds))
+
+        if len(matching_pairs) != 1:
+            continue
+
+        pair, kinds = matching_pairs[0]
+        pair_id = matching_pair_identity(pair)
+        if pair_id is not None:
+            selected_pair_ids.add(pair_id)
+            kinds_by_pair_id[pair_id] = kinds
+
+    selected_items: list[dict[str, Any]] = []
+    remaining_items: list[dict[str, Any]] = []
+    for pair in working_pairs:
+        pair_id = matching_pair_identity(pair)
+        if pair_id in selected_pair_ids:
+            selected_items.append(
+                matching_pair_with_spoken_tone_variant(
+                    pair,
+                    kinds_by_pair_id[pair_id],
+                    bucket=bucket,
+                    matching_rule=matching_rule,
+                )
+            )
+        else:
+            remaining_items.append(pair)
+
+    return {
+        "selected_items": selected_items,
+        "remaining_items": remaining_items,
+        "selected_source_form_ids": bucket_source_form_ids(selected_items),
+    }
+
+
 def match_unique_pinyin_kind_pairs(
     working_pairs: list[dict[str, Any]],
     *,
@@ -662,6 +786,17 @@ MATCHING_RULES = {
         ),
         selected_pair="the unique complete compact preserve-case Pinyin-list format-variant pair",
         handler=match_format_variant_unique_pairs,
+    ),
+    "spoken_tone_variant_unique": MatchingRuleDefinition(
+        name="spoken_tone_variant_unique",
+        scope="pair_pipeline",
+        requires=(
+            "The working set already contains only exact Simplified-compatible pairs",
+            "Exactly one remaining pair for the source form has toneless Pinyin equality",
+            "Every tone difference is explained by recognized spoken variants: 一 sandhi, 不 sandhi, or neutral tone differences",
+        ),
+        selected_pair="the unique recognized spoken-tone-variant pair",
+        handler=match_spoken_tone_variant_pairs,
     ),
     "default_unresolved": MatchingRuleDefinition(
         name="default_unresolved",
