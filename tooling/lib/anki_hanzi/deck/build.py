@@ -103,9 +103,9 @@ class DeckSelection:
 
 
 @dataclass(frozen=True)
-class ReadingGroup:
+class MeaningFormEntry:
     display_pinyin: str
-    forms: tuple[LexiconForm, ...]
+    form: LexiconForm
     tags: frozenset[str]
 
 
@@ -263,47 +263,29 @@ def _note_tags(tags: set[str]) -> tuple[str, ...]:
     return tuple(sorted(tag for tag in tags if not tag.startswith("source:")))
 
 
-def _selected_reading_groups(
+def _selected_meaning_forms(
     word: LexiconWord,
     forms: list[LexiconForm],
     mode: str,
     selection_tags: set[str],
     is_individual: bool,
-) -> list[ReadingGroup]:
-    groups: dict[str, list[LexiconForm]] = {}
-    display_by_key: dict[str, str] = {}
-    selected_display_by_key: dict[str, str] = {}
-
+) -> list[MeaningFormEntry]:
+    selected_forms: list[MeaningFormEntry] = []
     for form in forms:
         display_pinyin = _resolve_display_pinyin(form)
-        normalized_pinyin = common.normalized_note_pinyin(display_pinyin)
-        if not normalized_pinyin:
+        if not display_pinyin.strip():
             continue
-
-        groups.setdefault(normalized_pinyin, []).append(form)
-        display_by_key.setdefault(normalized_pinyin, display_pinyin)
 
         effective_tags = _effective_form_tags(word, form)
         if _is_form_selected(effective_tags, mode, selection_tags, is_individual):
-            selected_display_by_key.setdefault(normalized_pinyin, display_pinyin)
-
-    reading_groups: list[ReadingGroup] = []
-    for normalized_pinyin, group_forms in groups.items():
-        if normalized_pinyin not in selected_display_by_key:
-            continue
-
-        group_tags: set[str] = set()
-        for form in group_forms:
-            group_tags.update(_effective_form_tags(word, form))
-
-        reading_groups.append(
-            ReadingGroup(
-                display_pinyin=selected_display_by_key.get(normalized_pinyin) or display_by_key[normalized_pinyin],
-                forms=tuple(group_forms),
-                tags=frozenset(group_tags),
+            selected_forms.append(
+                MeaningFormEntry(
+                    display_pinyin=display_pinyin,
+                    form=form,
+                    tags=frozenset(effective_tags),
+                )
             )
-        )
-    return reading_groups
+    return selected_forms
 
 
 def _word_tags(word: LexiconWord, forms: list[LexiconForm]) -> set[str]:
@@ -375,7 +357,7 @@ def build_entries_from_state(
     write_entries: list[EnrichedWordEntry] = []
     matched_individual_simplified: set[str] = set()
     rendered_meaning_html_used = 0
-    seen_entry_keys: set[tuple[str, str]] = set()
+    seen_meaning_entry_keys: set[tuple[str, str]] = set()
     seen_word_level_words: set[str] = set()
     selection_tags = set(selection.tags)
 
@@ -414,18 +396,18 @@ def build_entries_from_state(
             write_entries.append(word_level_entry)
 
         word_entry_count = 0
-        for reading_group in _selected_reading_groups(
+        for meaning_form in _selected_meaning_forms(
             word=word,
             forms=forms,
             mode=mode,
             selection_tags=selection_tags,
             is_individual=is_individual,
         ):
-            display_pinyin = reading_group.display_pinyin
-            entry_key = (simplified, common.normalized_note_pinyin(display_pinyin))
-            if not entry_key[1] or entry_key in seen_entry_keys:
+            display_pinyin = meaning_form.display_pinyin
+            entry_key = (simplified, display_pinyin)
+            if entry_key in seen_meaning_entry_keys:
                 continue
-            seen_entry_keys.add(entry_key)
+            seen_meaning_entry_keys.add(entry_key)
 
             if is_individual:
                 matched_individual_simplified.add(simplified)
@@ -435,10 +417,10 @@ def build_entries_from_state(
                 simplified=simplified,
                 pinyin=display_pinyin,
                 definition_html=rendered_definition_html,
-                meaning_definition_html=render_meaning_group(word, list(reading_group.forms)),
+                meaning_definition_html=render_meaning_group(word, [meaning_form.form]),
                 audio_filename_primary=audio_filename_primary,
                 audio_filename_secondary=audio_filename_secondary,
-                tags=_note_tags(set(reading_group.tags)),
+                tags=_note_tags(set(meaning_form.tags)),
             )
             meaning_entries.append(entry)
             word_entry_count += 1
