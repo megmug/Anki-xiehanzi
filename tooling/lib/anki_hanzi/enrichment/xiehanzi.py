@@ -44,7 +44,6 @@ from anki_hanzi.enrichment.xiehanzi_matching import (
     candidate_count_bucket,
     candidate_count_buckets_for_source_forms,
     materialize_simplified_match_pairs,
-    pinyin_counts_for_items,
 )
 
 
@@ -544,15 +543,13 @@ def build_matching_report(
     default_source_form_ids_after_consumption = bucket_source_form_ids(default_items)
 
     initial_candidate_count_buckets = Counter(
-        candidate_count_bucket(entry_report["evidence_summary"]["candidate_count"])
+        candidate_count_bucket(entry_report["candidate_summary"]["candidate_count"])
         for entry_report in entry_reports_by_id.values()
     )
-    initial_pinyin_counts = pinyin_counts_for_items(working_pairs)
     default_candidate_count_buckets = candidate_count_buckets_for_source_forms(
         entry_reports_by_id,
         default_source_form_ids_after_consumption,
     )
-    default_pinyin_counts = pinyin_counts_for_items(default_items)
     perfect_match_selected_pair_count = bucket_results["perfect_match"]["selected_matching_pair_count"]
     perfect_match_consumed_pair_count = bucket_results["perfect_match"]["consumed_matching_pair_count"]
 
@@ -612,26 +609,17 @@ def build_matching_report(
         dictionary = item.get("dictionary")
         if dictionary is not None:
             report["target"] = dictionary["pinyin"]
+            report["definitions"] = {
+                "source": item.get("source_definitions", []),
+                "dictionary": dictionary.get("definitions", []),
+            }
 
         if context.get("candidate_count_for_source") is not None:
             report["candidate"] = f"{context.get('candidate_index_for_source')}/{context['candidate_count_for_source']}"
 
-        evidence = item.get("evidence", {})
-        if evidence:
-            report["evidence"] = {}
-            pinyin_evidence = evidence.get("pinyin")
-            if pinyin_evidence is not None:
-                report["evidence"]["pinyin"] = pinyin_evidence["kind"]
-            definition_evidence = evidence.get("definitions")
-            if definition_evidence is not None:
-                report["evidence"]["definitions"] = definition_evidence["kind"]
-                report["definitions"] = {
-                    "source": definition_evidence.get("source_preview", []),
-                    "dictionary": dictionary["definitions_preview"] if dictionary is not None else [],
-                }
-            for extra_key in ("manual_pinyin_override", "spoken_tone_variant"):
-                if extra_key in evidence:
-                    report["evidence"][extra_key] = evidence[extra_key]
+        for extra_key in ("manual_pinyin_override", "spoken_tone_variant"):
+            if extra_key in context:
+                report[extra_key] = context[extra_key]
 
         return report
 
@@ -668,8 +656,6 @@ def build_matching_report(
             "has_consumption_rule": definition.consumption_rule is not None,
             "reports_items": definition.report_items,
         }
-        if bucket == "default_unresolved":
-            item["remaining_matching_pair_count"] = sum(default_pinyin_counts.values())
         return item
 
     def bucket_report_item(definition: BucketDefinition) -> dict[str, Any]:
@@ -725,11 +711,9 @@ def build_matching_report(
             "initial_matching_pair_count": len(working_pairs),
             "perfect_match_selected_pair_count": perfect_match_selected_pair_count,
             "perfect_match_consumed_pair_count": perfect_match_consumed_pair_count,
-            "default_unresolved_matching_pair_count": sum(default_pinyin_counts.values()),
+            "default_unresolved_matching_pair_count": bucket_matching_pair_count(default_items),
             "initial_candidate_count_buckets": dict(sorted(initial_candidate_count_buckets.items())),
             "default_candidate_count_buckets": dict(sorted(default_candidate_count_buckets.items())),
-            "initial_matching_pair_pinyin_evidence_counts": dict(sorted(initial_pinyin_counts.items())),
-            "default_matching_pair_pinyin_evidence_counts": dict(sorted(default_pinyin_counts.items())),
             "bucket_item_limit": bucket_item_limit,
         },
         "pair_materialization": {
@@ -764,25 +748,6 @@ def build_matching_report(
             "source_prelude": "missing_dictionary_word removes source forms with no exact Simplified target key.",
             "pair_materialization": "simplified_match materializes only exact Simplified-compatible pairs.",
             "virtual_rejection": "simplified_mismatch is counted as a virtual aggregate and is not stored as items.",
-        },
-        "evidence_model": {
-            "pinyin": {
-                "exact": "Complete strict_numbered_preserve_case reading lists are identical.",
-                "format_variant": "Complete compact preserve-case reading lists match, but strict lists differ.",
-                "case_variant": "Complete compact casefolded reading lists match, but preserve-case lists differ.",
-                "toneless": "Complete tone-stripped compact casefolded reading lists match.",
-                "reading_overlap": "At least one normalized reading overlaps, but the complete reading lists differ.",
-                "mismatch": "No pinyin normal form matches.",
-                "missing": "Source or dictionary pinyin could not be normalized.",
-            },
-            "definitions": {
-                "exact": "At least one normalized definition is identical.",
-                "subset": "At least one normalized definition contains another.",
-                "strong_overlap": "Definition token Jaccard overlap is at least 0.6.",
-                "weak_overlap": "Definition token Jaccard overlap is non-zero.",
-                "none": "No definition token overlap.",
-                "missing": "Source or dictionary definitions are missing.",
-            },
         },
         "buckets": {
             definition.name: bucket_report_item(definition)

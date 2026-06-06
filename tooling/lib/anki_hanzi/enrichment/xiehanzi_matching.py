@@ -1,4 +1,4 @@
-"""Matching rules and evidence helpers for xiehanzi-to-CC-CEDICT alignment."""
+"""Matching rules and pair helpers for xiehanzi-to-CC-CEDICT alignment."""
 
 from __future__ import annotations
 
@@ -21,8 +21,6 @@ RuleHandler = Callable[..., dict[str, Any]]
 PINYIN_SEPARATOR_RE = re.compile(r"[\s'’·-]+")
 PINYIN_NUMBERED_TOKEN_RE = re.compile(r"[A-Za-züÜv:]+[1-5]?")
 LI_RE = re.compile(r"<li>(.*?)</li>", re.IGNORECASE | re.DOTALL)
-WORD_RE = re.compile(r"[a-z0-9]+")
-
 MANUAL_PINYIN_OVERRIDES = {
     ("标致", "7-9"): {
         "pinyin": "biao1zhi5",
@@ -152,16 +150,6 @@ def classify_pinyin(source_pinyin: str, dictionary_pinyin: str) -> str:
     return "mismatch"
 
 
-def pinyin_normalization_report(value: str) -> dict[str, Any]:
-    readings = pinyin_readings(value)
-    return {
-        "raw": str(value or ""),
-        "strict_numbered_preserve_case": [reading.strict for reading in readings],
-        "compact_preserve_case": [reading.compact_preserve_case for reading in readings],
-        "toneless_lower": [reading.toneless_lower for reading in readings],
-    }
-
-
 def form_pinyin_reading_string(form: LexiconForm) -> str:
     return " / ".join(form.pinyin_readings or [form.pinyin])
 
@@ -185,57 +173,6 @@ def definitions_from_meaning_html(value: str) -> list[str]:
     return definitions
 
 
-def normalize_definition(value: str) -> str:
-    value = strip_html_text(value).casefold()
-    value = re.sub(r"[^a-z0-9]+", " ", value)
-    return re.sub(r"\s+", " ", value).strip()
-
-
-def definition_tokens(values: list[str]) -> set[str]:
-    tokens: set[str] = set()
-    for value in values:
-        tokens.update(WORD_RE.findall(normalize_definition(value)))
-    return tokens
-
-
-def preview_text(value: str, limit: int = 120) -> str:
-    value = re.sub(r"\s+", " ", str(value or "")).strip()
-    if len(value) <= limit:
-        return value
-    return value[: limit - 1].rstrip() + "…"
-
-
-def definition_preview(values: list[str], limit: int = 2) -> list[str]:
-    return [preview_text(value) for value in values[:limit]]
-
-
-def classify_definitions(source_definitions: list[str], dictionary_definitions: list[str]) -> str:
-    source_normalized = {normalize_definition(definition) for definition in source_definitions}
-    dictionary_normalized = {normalize_definition(definition) for definition in dictionary_definitions}
-    source_normalized.discard("")
-    dictionary_normalized.discard("")
-    if not source_normalized or not dictionary_normalized:
-        return "missing"
-    if source_normalized & dictionary_normalized:
-        return "exact"
-
-    for source in source_normalized:
-        for dictionary in dictionary_normalized:
-            if source in dictionary or dictionary in source:
-                return "subset"
-
-    source_tokens = definition_tokens(source_definitions)
-    dictionary_tokens = definition_tokens(dictionary_definitions)
-    if not source_tokens or not dictionary_tokens:
-        return "missing"
-    overlap = len(source_tokens & dictionary_tokens) / len(source_tokens | dictionary_tokens)
-    if overlap >= 0.6:
-        return "strong_overlap"
-    if overlap > 0:
-        return "weak_overlap"
-    return "none"
-
-
 def source_entry_report(entry: dict[str, Any]) -> dict[str, Any]:
     report = {
         "simplified": entry["simplified"],
@@ -256,9 +193,7 @@ def candidate_report(entry: dict[str, Any], target: TargetFormRef) -> dict[str, 
     word = target.word
     form = target.form
     dictionary_pinyin = form_pinyin_reading_string(form)
-    pinyin_kind = classify_pinyin(entry["pinyin"], dictionary_pinyin)
     source_definitions = definitions_from_meaning_html(entry["meaning_html"])
-    definition_kind = classify_definitions(source_definitions, list(form.definitions))
     return {
         "target": {
             "word_key": target.word_key,
@@ -271,34 +206,15 @@ def candidate_report(entry: dict[str, Any], target: TargetFormRef) -> dict[str, 
             "pinyin_readings": list(form.pinyin_readings),
             "traditional_variants": list(form.traditional_variants),
             "tags": list(form.tags),
-            "definitions_preview": definition_preview(list(form.definitions)),
+            "definitions": list(form.definitions),
         },
-        "evidence": {
-            "simplified": {"kind": "exact"},
-            "pinyin": {
-                "kind": pinyin_kind,
-                "source": pinyin_normalization_report(entry["pinyin"]),
-                "dictionary": pinyin_normalization_report(dictionary_pinyin),
-            },
-            "definitions": {
-                "kind": definition_kind,
-                "source_preview": definition_preview(source_definitions),
-            },
-        },
+        "source_definitions": source_definitions,
     }
 
 
-def entry_evidence_summary(candidates: list[dict[str, Any]]) -> dict[str, Any]:
-    strict_pinyin_exact_count = sum(1 for candidate in candidates if candidate["evidence"]["pinyin"]["kind"] == "exact")
-    if not candidates:
-        return {
-            "candidate_count": 0,
-            "strict_pinyin_exact_candidate_count": 0,
-        }
-
+def entry_candidate_summary(candidates: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "candidate_count": len(candidates),
-        "strict_pinyin_exact_candidate_count": strict_pinyin_exact_count,
     }
 
 
@@ -320,10 +236,9 @@ def build_target_form_index(state: LexiconState) -> dict[str, list[TargetFormRef
     return target_form_index
 
 
-def empty_entry_evidence_summary() -> dict[str, Any]:
+def empty_entry_candidate_summary() -> dict[str, Any]:
     return {
         "candidate_count": 0,
-        "strict_pinyin_exact_candidate_count": 0,
     }
 
 
@@ -333,7 +248,7 @@ def source_matching_entry_report(entry: dict[str, Any], source_form_id: int) -> 
         "source_key": simplified_matching_key(entry["simplified"]),
         "entry": entry,
         "source_entry": source_entry_report(entry),
-        "evidence_summary": empty_entry_evidence_summary(),
+        "candidate_summary": empty_entry_candidate_summary(),
         "candidates": [],
     }
 
@@ -359,18 +274,17 @@ def matching_pair_report(
     candidate_index: int,
     matching_rule: str,
 ) -> dict[str, Any]:
-    evidence_summary = entry_report["evidence_summary"]
+    candidate_summary = entry_report["candidate_summary"]
     return {
         "source": entry_report["source_entry"],
         "target": candidate["target"],
         "dictionary": candidate["dictionary"],
+        "source_definitions": candidate["source_definitions"],
         "context": {
             "source_form_id": entry_report["source_form_id"],
-            "candidate_count_for_source": evidence_summary["candidate_count"],
+            "candidate_count_for_source": candidate_summary["candidate_count"],
             "candidate_index_for_source": candidate_index,
-            "strict_pinyin_exact_candidate_count_for_source": evidence_summary["strict_pinyin_exact_candidate_count"],
         },
-        "evidence": candidate["evidence"],
         "bucket": bucket,
         "matching_rule": matching_rule,
     }
@@ -382,7 +296,6 @@ def missing_dictionary_word_report(entry_report: dict[str, Any], *, bucket: str,
         "context": {
             "source_form_id": entry_report["source_form_id"],
             "candidate_count_for_source": 0,
-            "strict_pinyin_exact_candidate_count_for_source": 0,
         },
         "bucket": bucket,
         "matching_rule": matching_rule,
@@ -425,20 +338,6 @@ def matching_pair_with_manual_pinyin_override(
     pair["context"] = {
         **pair["context"],
         "manual_pinyin_override": override,
-    }
-    pair["evidence"] = {
-        **pair["evidence"],
-        "manual_pinyin_override": {
-            "kind": "configured",
-            "reason": override["reason"],
-            "raw_source": pinyin_normalization_report(override["raw_pinyin"]),
-            "corrected_source": pinyin_normalization_report(override["override_pinyin"]),
-            "dictionary": pinyin_normalization_report(pair["dictionary"]["pinyin"]),
-            "corrected_source_to_dictionary": classify_pinyin(
-                override["override_pinyin"],
-                pair["dictionary"]["pinyin"],
-            ),
-        },
     }
     return pair
 
@@ -504,14 +403,11 @@ def matching_pair_with_spoken_tone_variant(
             "kinds": list(kinds),
         },
     }
-    pair["evidence"] = {
-        **pair["evidence"],
-        "spoken_tone_variant": {
-            "kind": "recognized",
-            "kinds": list(kinds),
-        },
-    }
     return pair
+
+
+def pair_pinyin_kind(pair: dict[str, Any]) -> str:
+    return classify_pinyin(pair["source"]["pinyin"], pair["dictionary"]["pinyin"])
 
 
 def match_missing_dictionary_word_sources(
@@ -545,7 +441,7 @@ def materialize_simplified_match_pairs(
         target_refs = target_form_index.get(entry_report["source_key"], [])
         candidates = [candidate_report(entry, target) for target in target_refs]
         entry_report["candidates"] = candidates
-        entry_report["evidence_summary"] = entry_evidence_summary(candidates)
+        entry_report["candidate_summary"] = entry_candidate_summary(candidates)
 
         for candidate_index, candidate in enumerate(candidates, start=1):
             working_pairs.append(
@@ -663,7 +559,7 @@ def match_spoken_tone_variant_pairs(
     for source_pairs in pairs_by_source_form.values():
         matching_pairs: list[tuple[dict[str, Any], tuple[str, ...]]] = []
         for pair in source_pairs:
-            if pair["evidence"]["pinyin"]["kind"] != "toneless":
+            if pair_pinyin_kind(pair) != "toneless":
                 continue
             kinds = spoken_tone_variant_kinds(pair["source"]["pinyin"], pair["dictionary"]["pinyin"])
             if kinds:
@@ -714,7 +610,7 @@ def match_unique_pinyin_kind_pairs(
 
     selected_pair_ids: set[tuple[int, int]] = set()
     for source_pairs in pairs_by_source_form.values():
-        matching_pairs = [pair for pair in source_pairs if pair["evidence"]["pinyin"]["kind"] == pinyin_kind]
+        matching_pairs = [pair for pair in source_pairs if pair_pinyin_kind(pair) == pinyin_kind]
         if len(matching_pairs) == 1:
             pair_id = matching_pair_identity(matching_pairs[0])
             if pair_id is not None:
@@ -807,16 +703,12 @@ MATCHING_RULES = {
 }
 
 
-def pinyin_counts_for_items(items: list[dict[str, Any]]) -> Counter[str]:
-    return Counter(item["evidence"]["pinyin"]["kind"] for item in items if "evidence" in item)
-
-
 def candidate_count_buckets_for_source_forms(
     entry_reports_by_id: dict[int, dict[str, Any]],
     source_form_ids: set[int],
 ) -> Counter[str]:
     counts: Counter[str] = Counter()
     for source_form_id in source_form_ids:
-        candidate_count = entry_reports_by_id[source_form_id]["evidence_summary"]["candidate_count"]
+        candidate_count = entry_reports_by_id[source_form_id]["candidate_summary"]["candidate_count"]
         counts[candidate_count_bucket(candidate_count)] += 1
     return counts

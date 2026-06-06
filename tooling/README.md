@@ -37,7 +37,7 @@ These modules are imported by build programs and are not direct entry points.
 - `lib/anki_hanzi/deck/build.py`: typed lexicon-to-APKG build orchestration.
 - `lib/anki_hanzi/deck/common.py`: shared template, media, model, config, and stable-id helpers.
 - `lib/anki_hanzi/enrichment/`: hanzi HSK, xiehanzi, and frequency enrichment stages.
-  This includes the report-only matching scaffold used to inspect candidate evidence before changing enrichment rules.
+  This includes the bucket-based matching scaffold used to inspect unresolved pairs before changing enrichment rules.
 - `lib/anki_hanzi/lexicon/`: internal lexicon state and CC-CEDICT source parser.
 - `lib/anki_hanzi/rendering/meaning_html.py`: render hanzi-style Meaning HTML from structured word and form data.
 - `lib/anki_hanzi/audio/`: provider-neutral audio generation plus Kokoro and edge-tts backends.

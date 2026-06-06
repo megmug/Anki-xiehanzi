@@ -62,6 +62,86 @@ def normalize_pinyin_u_variants(value: str) -> str:
     return value.replace("ü", "v").replace("Ü", "V").replace("u:", "v").replace("U:", "V")
 
 
+def strict_numbered_preserve_case(value: str) -> str:
+    value = unicodedata.normalize("NFC", str(value or "").strip())
+    value = re.sub(r"\s+", " ", value)
+    if not value:
+        return ""
+    if re.search(r"\d", value):
+        numbered = value
+    else:
+        try:
+            numbered = transcriptions.accented_to_numbered(value)
+        except ValueError:
+            numbered = value
+    return normalize_pinyin_u_variants(numbered)
+
+
+def pinyin_rule_readings(value: str) -> list[dict[str, str]]:
+    readings: list[dict[str, str]] = []
+    for part in re.split(r"/", str(value or "")):
+        strict = strict_numbered_preserve_case(part)
+        if not strict:
+            continue
+        compact_preserve_case = PINYIN_SEPARATOR_RE.sub("", strict)
+        compact_lower = compact_preserve_case.casefold()
+        toneless_lower = re.sub(r"\d", "", compact_lower)
+        readings.append(
+            {
+                "strict": strict,
+                "compact_preserve_case": compact_preserve_case,
+                "compact_lower": compact_lower,
+                "toneless_lower": toneless_lower,
+            }
+        )
+    return readings
+
+
+def pinyin_rule_values(readings: list[dict[str, str]], attribute: str) -> list[str]:
+    return [reading[attribute] for reading in readings]
+
+
+def pinyin_rule_values_overlap(source_values: list[str], dictionary_values: list[str]) -> bool:
+    return bool(set(source_values) & set(dictionary_values))
+
+
+def pinyin_rule_kind(source_pinyin: str, dictionary_pinyin: str) -> str:
+    source_readings = pinyin_rule_readings(source_pinyin)
+    dictionary_readings = pinyin_rule_readings(dictionary_pinyin)
+    if not source_readings or not dictionary_readings:
+        return "missing"
+
+    source_strict = pinyin_rule_values(source_readings, "strict")
+    dictionary_strict = pinyin_rule_values(dictionary_readings, "strict")
+    if source_strict == dictionary_strict:
+        return "exact"
+
+    source_compact_preserve_case = pinyin_rule_values(source_readings, "compact_preserve_case")
+    dictionary_compact_preserve_case = pinyin_rule_values(dictionary_readings, "compact_preserve_case")
+    if source_compact_preserve_case == dictionary_compact_preserve_case:
+        return "format_variant"
+
+    source_compact_lower = pinyin_rule_values(source_readings, "compact_lower")
+    dictionary_compact_lower = pinyin_rule_values(dictionary_readings, "compact_lower")
+    if source_compact_lower == dictionary_compact_lower:
+        return "case_variant"
+
+    source_toneless_lower = pinyin_rule_values(source_readings, "toneless_lower")
+    dictionary_toneless_lower = pinyin_rule_values(dictionary_readings, "toneless_lower")
+    if source_toneless_lower == dictionary_toneless_lower:
+        return "toneless"
+
+    if (
+        pinyin_rule_values_overlap(source_strict, dictionary_strict)
+        or pinyin_rule_values_overlap(source_compact_preserve_case, dictionary_compact_preserve_case)
+        or pinyin_rule_values_overlap(source_compact_lower, dictionary_compact_lower)
+        or pinyin_rule_values_overlap(source_toneless_lower, dictionary_toneless_lower)
+    ):
+        return "reading_overlap"
+
+    return "mismatch"
+
+
 def numbered_pinyin_part(value: str) -> str:
     value = unicodedata.normalize("NFC", value.strip())
     if not value:
@@ -187,6 +267,10 @@ def entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
     if entry.get("manual_pinyin_override"):
         summary["manual_pinyin_override"] = entry["manual_pinyin_override"]
     return summary
+
+
+def form_pinyin_reading_string(form: LexiconForm) -> str:
+    return " / ".join(form.pinyin_readings or [form.pinyin])
 
 
 def build_state_word_index(state: LexiconState) -> dict[str, LexiconWord]:
@@ -789,11 +873,10 @@ def consume_perfect_match_bucket(
     consumed_entries: list[dict[str, Any]] = []
 
     for item in sorted(selected_items, key=pair_source_form_id):
-        if item["evidence"]["pinyin"]["kind"] != "exact":
-            raise ValueError(f"Perfect-match bucket selected a non-exact pair: {item!r}")
-
         word, form, _, _ = target_word_and_form_from_pair(state, item)
         entry = deck_entry_for_pair(deck_entries, item)
+        if pinyin_rule_kind(entry["pinyin"], form_pinyin_reading_string(form)) != "exact":
+            raise ValueError(f"Perfect-match bucket selected a non-exact pair: {item!r}")
         apply_entry_metadata_to_selected_form(word, form, entry)
         form_stats["matched"] += 1
         record_form_match(form_stats, "exact")
@@ -819,7 +902,7 @@ def consume_manual_pinyin_override_bucket(
         word, form, _, form_key = target_word_and_form_from_pair(state, item)
         entry = deck_entry_with_manual_pinyin_override(deck_entries, item)
         old_pinyin = form.pinyin
-        match_type = classify_pinyin_match(old_pinyin, entry["pinyin"])
+        match_type = pinyin_rule_kind(entry["pinyin"], form_pinyin_reading_string(form))
         if match_type not in {"exact", "format_variant"}:
             raise ValueError(f"Manual Pinyin override no longer matches the selected target form: {item!r}")
 
@@ -894,11 +977,10 @@ def consume_format_variant_bucket(
     consumed_entries: list[dict[str, Any]] = []
 
     for item in sorted(selected_items, key=pair_source_form_id):
-        if item["evidence"]["pinyin"]["kind"] != "format_variant":
-            raise ValueError(f"Format-variant bucket selected a non-format-variant pair: {item!r}")
-
         word, form, _, _ = target_word_and_form_from_pair(state, item)
         entry = deck_entry_for_pair(deck_entries, item)
+        if pinyin_rule_kind(entry["pinyin"], form_pinyin_reading_string(form)) != "format_variant":
+            raise ValueError(f"Format-variant bucket selected a non-format-variant pair: {item!r}")
         apply_entry_metadata_to_selected_form(word, form, entry)
         form_stats["matched"] += 1
         record_form_match(form_stats, "format_variant")
@@ -923,13 +1005,15 @@ def consume_spoken_tone_variant_bucket(
     added_readings: list[dict[str, Any]] = []
 
     for item in sorted(selected_items, key=pair_source_form_id):
-        if item["evidence"]["pinyin"]["kind"] != "toneless":
-            raise ValueError(f"Spoken-tone-variant bucket selected a non-toneless pair: {item!r}")
-        if item["evidence"].get("spoken_tone_variant", {}).get("kind") != "recognized":
-            raise ValueError(f"Spoken-tone-variant bucket lacks recognized variant evidence: {item!r}")
+        spoken_tone_variant = item["context"].get("spoken_tone_variant")
+        if not spoken_tone_variant or not spoken_tone_variant.get("kinds"):
+            raise ValueError(f"Spoken-tone-variant bucket lacks recognized variant context: {item!r}")
 
         word, form, _, _ = target_word_and_form_from_pair(state, item)
         entry = deck_entry_for_pair(deck_entries, item)
+        dictionary_pinyin = form_pinyin_reading_string(form)
+        if pinyin_rule_kind(entry["pinyin"], dictionary_pinyin) != "toneless":
+            raise ValueError(f"Spoken-tone-variant bucket selected a non-toneless pair: {item!r}")
         apply_entry_metadata_to_selected_form(word, form, entry)
 
         source_pinyin = source_pinyin_in_dictionary_format(entry["pinyin"], item["dictionary"]["pinyin"])
@@ -942,7 +1026,7 @@ def consume_spoken_tone_variant_bucket(
             {
                 "entry": entry_summary(entry),
                 "target": item["target"],
-                "spoken_tone_variant_kinds": list(item["evidence"]["spoken_tone_variant"]["kinds"]),
+                "spoken_tone_variant_kinds": list(spoken_tone_variant["kinds"]),
                 "dictionary_primary_pinyin": form.pinyin,
                 "source_pinyin": source_pinyin,
                 "old_pinyin_readings": old_readings,
