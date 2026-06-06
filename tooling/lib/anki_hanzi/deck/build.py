@@ -235,7 +235,16 @@ def build_hanzi_writer_bundle(
 
 
 def _resolve_display_pinyin(form: LexiconForm) -> str:
-    return numbered_to_display(form.pinyin)
+    return " / ".join(_resolve_display_pinyin_readings(form))
+
+
+def _resolve_display_pinyin_readings(form: LexiconForm) -> list[str]:
+    readings: list[str] = []
+    for reading in form.pinyin_readings or [form.pinyin]:
+        display_pinyin = numbered_to_display(reading).strip()
+        if display_pinyin:
+            readings.append(display_pinyin)
+    return readings
 
 
 def _effective_form_tags(word: LexiconWord, form: LexiconForm) -> set[str]:
@@ -266,16 +275,14 @@ def _note_tags(tags: set[str]) -> tuple[str, ...]:
 def _assert_unique_form_display_pinyin(word: LexiconWord, forms: list[LexiconForm]) -> None:
     seen: dict[str, LexiconForm] = {}
     for form in forms:
-        display_pinyin = _resolve_display_pinyin(form).strip()
-        if not display_pinyin:
-            continue
-        existing = seen.get(display_pinyin)
-        if existing is not None and existing is not form:
-            raise ValueError(
-                f"Word {word.simplified!r} has multiple forms with display Pinyin "
-                f"{display_pinyin!r}: {existing.pinyin!r} and {form.pinyin!r}"
-            )
-        seen[display_pinyin] = form
+        for display_pinyin in _resolve_display_pinyin_readings(form):
+            existing = seen.get(display_pinyin)
+            if existing is not None and existing is not form:
+                raise ValueError(
+                    f"Word {word.simplified!r} has multiple forms with overlapping display Pinyin "
+                    f"{display_pinyin!r}: {existing.pinyin_readings!r} and {form.pinyin_readings!r}"
+                )
+            seen[display_pinyin] = form
 
 
 def _selected_meaning_forms(
@@ -334,12 +341,12 @@ def _display_pinyin_readings(forms: list[LexiconForm]) -> str:
     readings: list[str] = []
     seen: set[str] = set()
     for form in forms:
-        display_pinyin = _resolve_display_pinyin(form)
-        normalized_pinyin = common.normalized_note_pinyin(display_pinyin)
-        if not normalized_pinyin or normalized_pinyin in seen:
-            continue
-        seen.add(normalized_pinyin)
-        readings.append(display_pinyin)
+        for display_pinyin in _resolve_display_pinyin_readings(form):
+            normalized_pinyin = common.normalized_note_pinyin(display_pinyin)
+            if not normalized_pinyin or normalized_pinyin in seen:
+                continue
+            seen.add(normalized_pinyin)
+            readings.append(display_pinyin)
     return " / ".join(readings)
 
 

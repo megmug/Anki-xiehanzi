@@ -2,12 +2,36 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 
 ENRICHED_LEXICON_SCHEMA = "hanzi-enriched-lexicon-v1"
+
+
+def split_pinyin_readings(value: Any) -> list[str]:
+    readings: list[str] = []
+    if isinstance(value, list):
+        values = value
+    else:
+        values = [value]
+
+    for item in values:
+        for part in re.split(r"/", str(item or "")):
+            reading = re.sub(r"\s+", " ", part.strip())
+            if reading and reading not in readings:
+                readings.append(reading)
+    return readings
+
+
+def normalize_single_pinyin(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip())
+
+
+def sorted_pinyin_readings(values: list[str]) -> list[str]:
+    return sorted(dict.fromkeys(values), key=lambda value: (value.casefold(), value))
 
 
 @dataclass(frozen=True)
@@ -102,9 +126,38 @@ class LexiconEnrichmentMetadata:
 @dataclass
 class LexiconForm:
     pinyin: str
+    pinyin_readings: list[str] = field(default_factory=list)
     traditional_variants: list[str] = field(default_factory=list)
     definitions: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=lambda: ["source:cc-cedict"])
+
+    def __post_init__(self) -> None:
+        primary_reading = normalize_single_pinyin(self.pinyin)
+        extra_readings = split_pinyin_readings(self.pinyin_readings)
+        all_readings = ([primary_reading] if primary_reading else []) + extra_readings
+        self.pinyin = primary_reading or (extra_readings[0] if extra_readings else "")
+        self.pinyin_readings = sorted_pinyin_readings(all_readings)
+
+    def replace_pinyin(self, value: str) -> None:
+        reading = normalize_single_pinyin(value)
+        self.pinyin = reading
+        self.pinyin_readings = [reading] if reading else []
+
+    def add_pinyin_readings(self, value: str) -> list[str]:
+        added: list[str] = []
+        readings = list(self.pinyin_readings)
+        for reading in split_pinyin_readings(value):
+            if reading in readings:
+                continue
+            readings.append(reading)
+            added.append(reading)
+        self.pinyin_readings = sorted_pinyin_readings(readings)
+        if not self.pinyin and self.pinyin_readings:
+            self.pinyin = self.pinyin_readings[0]
+        return added
+
+    def pinyin_sort_key(self) -> tuple[list[str], str]:
+        return (list(self.pinyin_readings), self.pinyin)
 
     def add_traditional_variant(self, traditional: str) -> None:
         if traditional not in self.traditional_variants:
@@ -128,20 +181,30 @@ class LexiconForm:
         self.tags.sort()
 
     def to_json(self) -> dict[str, Any]:
-        return {
+        data = {
             "definitions": list(self.definitions),
             "pinyin": self.pinyin,
             "tags": list(self.tags),
             "traditional_variants": list(self.traditional_variants),
         }
+        if len(self.pinyin_readings) > 1:
+            data["pinyin_readings"] = list(self.pinyin_readings)
+        return data
 
     def to_master_json(self) -> dict[str, Any]:
         return self.to_json()
 
     @classmethod
     def from_master_json(cls, data: dict[str, Any]) -> "LexiconForm":
+        pinyin = data.get("pinyin") or ""
+        if isinstance(pinyin, list):
+            pinyin_readings = split_pinyin_readings(pinyin)
+            pinyin = pinyin_readings[0] if pinyin_readings else ""
+        else:
+            pinyin_readings = split_pinyin_readings(data.get("pinyin_readings", []))
         return cls(
-            pinyin=str(data.get("pinyin") or ""),
+            pinyin=str(pinyin),
+            pinyin_readings=pinyin_readings,
             traditional_variants=[str(value) for value in data.get("traditional_variants", [])],
             definitions=[str(value) for value in data.get("definitions", [])],
             tags=[str(value) for value in data.get("tags", [])],
@@ -194,13 +257,13 @@ class LexiconWord:
         self.has_hanzi_frequency = True
 
     def sorted_forms(self) -> list[LexiconForm]:
-        return sorted(self.forms.values(), key=lambda form: form.pinyin)
+        return sorted(self.forms.values(), key=lambda form: form.pinyin_sort_key())
 
     def forms_in_order(self) -> list[LexiconForm]:
         return list(self.forms.values())
 
     def sort_forms_by_pinyin(self) -> None:
-        self.forms = dict(sorted(self.forms.items(), key=lambda item: item[1].pinyin))
+        self.forms = dict(sorted(self.forms.items(), key=lambda item: item[1].pinyin_sort_key()))
 
     def to_json(
         self,

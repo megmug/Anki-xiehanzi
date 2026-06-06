@@ -97,13 +97,18 @@ def rendered_definitions(form: LexiconForm) -> list[str]:
     return definitions
 
 
+def form_pinyin_reading_string(form: LexiconForm) -> str:
+    return " / ".join(form.pinyin_readings or [form.pinyin])
+
+
 def render_meaning_form(word: LexiconWord, form: LexiconForm) -> str:
     simplified = word.simplified
-    pinyin = form.pinyin
+    primary_pinyin = form.pinyin
+    pinyin = form_pinyin_reading_string(form)
 
     output = [
         '<div class="char">  ',
-        f'<span id="char-sim-id">{colored_characters(simplified, pinyin)} </span>',
+        f'<span id="char-sim-id">{colored_characters(simplified, primary_pinyin)} </span>',
         " </div>",
     ]
 
@@ -125,20 +130,26 @@ def merge_meaning_forms(forms: list[LexiconForm]) -> LexiconForm:
         return LexiconForm(pinyin="", definitions=[])
 
     definitions: list[str] = []
+    pinyin_readings: list[str] = []
     seen: set[str] = set()
     for form in forms:
+        for reading in form.pinyin_readings or [form.pinyin]:
+            if reading not in pinyin_readings:
+                pinyin_readings.append(reading)
         for definition in rendered_definitions(form):
             if definition in seen:
                 continue
             definitions.append(definition)
             seen.add(definition)
 
-    return LexiconForm(pinyin=forms[0].pinyin, definitions=definitions)
+    return LexiconForm(pinyin=forms[0].pinyin, pinyin_readings=pinyin_readings, definitions=definitions)
 
 
 def render_meaning_group(word: LexiconWord, forms: list[LexiconForm]) -> str:
     if not forms:
         return ""
+    if len(forms) == 1:
+        return render_meaning_form(word, forms[0])
     return render_meaning_form(word, merge_meaning_forms(forms))
 
 
