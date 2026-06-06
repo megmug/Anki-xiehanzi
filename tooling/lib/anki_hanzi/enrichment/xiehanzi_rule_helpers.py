@@ -126,8 +126,7 @@ def definitions_from_meaning_html(value: str) -> list[str]:
 
 
 def normalize_matching_definition(value: str) -> str:
-    value = strip_html_text(value).casefold()
-    value = re.sub(r"[^a-z0-9]+", " ", value)
+    value = unicodedata.normalize("NFC", strip_html_text(value)).casefold()
     return re.sub(r"\s+", " ", value).strip()
 
 
