@@ -22,6 +22,7 @@ ConsumptionRuleHandler = Callable[..., dict[str, Any]]
 StateConsumptionRuleHandler = Callable[..., dict[str, Any]]
 
 PINYIN_SEPARATOR_RE = re.compile(r"[\s'’\-·]+")
+PINYIN_NUMBERED_TOKEN_RE = re.compile(r"[A-Za-züÜv:]+[1-5]?")
 LI_RE = re.compile(r"<li>(.*?)</li>", re.IGNORECASE | re.DOTALL)
 PINYIN_PAIR_MATCH_PREFERENCE = ("exact", "format_variant", "case_variant")
 FORM_MATCH_PREFERENCE = ("exact", "format_variant", "case_variant", "reading_variant")
@@ -94,6 +95,58 @@ def canonical_pinyin_readings(value: str) -> list[PinyinReading]:
                 )
             )
     return readings
+
+
+def numbered_pinyin_tokens(value: str) -> list[str]:
+    return PINYIN_NUMBERED_TOKEN_RE.findall(numbered_pinyin_part(value))
+
+
+def split_numbered_pinyin_token(value: str) -> tuple[str, str]:
+    match = re.fullmatch(r"([A-Za-züÜv:]+)([1-5]?)", value)
+    if match is None:
+        raise ValueError(f"Invalid numbered Pinyin token: {value!r}")
+    return match.group(1), match.group(2)
+
+
+def pinyin_base_key(value: str) -> str:
+    return normalize_pinyin_u_variants(value).casefold()
+
+
+def source_tone_on_reference_base(source_token: str, reference_token: str) -> str:
+    source_base, source_tone = split_numbered_pinyin_token(source_token)
+    reference_base, _ = split_numbered_pinyin_token(reference_token)
+    if pinyin_base_key(source_base) != pinyin_base_key(reference_base):
+        raise ValueError(
+            f"Cannot align spoken-tone Pinyin token {source_token!r} with dictionary token {reference_token!r}"
+        )
+    return f"{reference_base}{source_tone}"
+
+
+def source_pinyin_in_dictionary_format(source_pinyin: str, dictionary_pinyin: str) -> str:
+    source_parts = [part for part in re.split(r"/", str(source_pinyin or "")) if part.strip()]
+    dictionary_parts = [part for part in re.split(r"/", str(dictionary_pinyin or "")) if part.strip()]
+    if len(source_parts) != len(dictionary_parts):
+        raise ValueError(
+            f"Cannot align spoken-tone Pinyin readings {source_pinyin!r} with dictionary readings {dictionary_pinyin!r}"
+        )
+
+    formatted_readings: list[str] = []
+    for source_part, dictionary_part in zip(source_parts, dictionary_parts):
+        source_tokens = numbered_pinyin_tokens(source_part)
+        dictionary_tokens = numbered_pinyin_tokens(dictionary_part)
+        if len(source_tokens) != len(dictionary_tokens):
+            raise ValueError(
+                f"Cannot align spoken-tone Pinyin syllables {source_part!r} with dictionary syllables "
+                f"{dictionary_part!r}"
+            )
+        formatted_readings.append(
+            " ".join(
+                source_tone_on_reference_base(source_token, dictionary_token)
+                for source_token, dictionary_token in zip(source_tokens, dictionary_tokens)
+            )
+        )
+
+    return " / ".join(formatted_readings)
 
 
 def pinyin_lookup_keys(value: str) -> list[str]:
@@ -409,6 +462,7 @@ def new_form_stats() -> dict[str, Any]:
             "format_variant": 0,
             "case_variant": 0,
             "reading_variant": 0,
+            "spoken_tone_variant": 0,
             "toneless": 0,
             "created": 0,
         },
@@ -492,6 +546,13 @@ def drop_format_variant_source_form_pairs(
     return drop_source_form_pairs(selected_items, remaining_items)
 
 
+def consume_spoken_tone_variant_source_form_pairs(
+    selected_items: list[dict[str, Any]],
+    remaining_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return drop_source_form_pairs(selected_items, remaining_items)
+
+
 def apply_legacy_enrichment_fallback_pairs(
     selected_items: list[dict[str, Any]],
     remaining_items: list[dict[str, Any]],
@@ -531,6 +592,12 @@ CONSUMPTION_RULES = {
         report_only_effect="remove all remaining matching pairs for the format-variant source form",
         enrichment_effect="apply tags and metadata directly to the selected dictionary form without changing Pinyin",
         handler=drop_format_variant_source_form_pairs,
+    ),
+    "consume_spoken_tone_variant_source_form_pairs": ConsumptionRuleDefinition(
+        name="consume_spoken_tone_variant_source_form_pairs",
+        report_only_effect="remove all remaining matching pairs for the spoken-tone-variant source form",
+        enrichment_effect="add the source Pinyin as an accepted reading on the selected dictionary form",
+        handler=consume_spoken_tone_variant_source_form_pairs,
     ),
     "apply_legacy_enrichment_fallback": ConsumptionRuleDefinition(
         name="apply_legacy_enrichment_fallback",
@@ -845,6 +912,55 @@ def consume_format_variant_bucket(
     }
 
 
+def consume_spoken_tone_variant_bucket(
+    state: LexiconState,
+    deck_entries: list[dict[str, Any]],
+    pipeline: dict[str, Any],
+    form_stats: dict[str, Any],
+) -> dict[str, Any]:
+    selected_items = pipeline["bucket_results"]["spoken_tone_variant"]["selected_items"]
+    consumed_entries: list[dict[str, Any]] = []
+    added_readings: list[dict[str, Any]] = []
+
+    for item in sorted(selected_items, key=pair_source_form_id):
+        if item["evidence"]["pinyin"]["kind"] != "toneless":
+            raise ValueError(f"Spoken-tone-variant bucket selected a non-toneless pair: {item!r}")
+        if item["evidence"].get("spoken_tone_variant", {}).get("kind") != "recognized":
+            raise ValueError(f"Spoken-tone-variant bucket lacks recognized variant evidence: {item!r}")
+
+        word, form, _, _ = target_word_and_form_from_pair(state, item)
+        entry = deck_entry_for_pair(deck_entries, item)
+        apply_entry_metadata_to_selected_form(word, form, entry)
+
+        source_pinyin = source_pinyin_in_dictionary_format(entry["pinyin"], item["dictionary"]["pinyin"])
+        old_readings = list(form.pinyin_readings)
+        added = form.add_pinyin_readings(source_pinyin)
+        form_stats["matched"] += 1
+        record_form_match(form_stats, "spoken_tone_variant")
+
+        added_readings.append(
+            {
+                "entry": entry_summary(entry),
+                "target": item["target"],
+                "spoken_tone_variant_kinds": list(item["evidence"]["spoken_tone_variant"]["kinds"]),
+                "dictionary_primary_pinyin": form.pinyin,
+                "source_pinyin": source_pinyin,
+                "old_pinyin_readings": old_readings,
+                "added_pinyin_readings": added,
+                "new_pinyin_readings": list(form.pinyin_readings),
+            }
+        )
+        consumed_entries.append(entry)
+
+    return {
+        "entries": [entry_summary(entry) for entry in consumed_entries],
+        "entry_count": len(consumed_entries),
+        "added_readings": added_readings,
+        "form_stats": form_stats,
+        "state_effect": "added source Pinyin as accepted readings on the selected dictionary forms",
+    }
+
+
 def consume_missing_dictionary_word_bucket(
     state: LexiconState,
     deck_entries: list[dict[str, Any]],
@@ -879,6 +995,7 @@ def consume_default_unresolved_bucket(
     return {
         "entries": default_entries,
         "entry_count": len(default_entries),
+        "default_unresolved_entry_count": len(default_source_form_ids),
         "missing_deck_after_pipeline": missing_deck_after_pipeline,
         "form_stats": form_stats,
         "state_effect": "applied the previous hanzi enrichment merge as fallback",
@@ -909,6 +1026,12 @@ STATE_CONSUMPTION_RULES = {
         bucket="format_variant_unique",
         state_effect="apply format-variant tags and metadata directly without changing dictionary Pinyin",
         handler=consume_format_variant_bucket,
+    ),
+    "spoken_tone_variant": StateConsumptionRuleDefinition(
+        name="consume_spoken_tone_variant_bucket",
+        bucket="spoken_tone_variant",
+        state_effect="add source Pinyin as accepted readings on selected dictionary forms",
+        handler=consume_spoken_tone_variant_bucket,
     ),
     "default_unresolved": StateConsumptionRuleDefinition(
         name="consume_default_unresolved_bucket",
@@ -954,6 +1077,14 @@ def apply_pipeline_enrichment_to_state(
     )
     form_stats = format_variant_stats["form_stats"]
 
+    spoken_tone_variant = STATE_CONSUMPTION_RULES["spoken_tone_variant"].handler(
+        state=state,
+        deck_entries=deck_entries,
+        pipeline=pipeline,
+        form_stats=form_stats,
+    )
+    form_stats = spoken_tone_variant["form_stats"]
+
     default_unresolved = STATE_CONSUMPTION_RULES["default_unresolved"].handler(
         state,
         deck_entries,
@@ -971,6 +1102,7 @@ def apply_pipeline_enrichment_to_state(
         "perfect_match": perfect_match_stats,
         "manual_pinyin_override": manual_pinyin_override_stats,
         "format_variant_unique": format_variant_stats,
+        "spoken_tone_variant": spoken_tone_variant,
         "default_unresolved": {
             key: value for key, value in default_unresolved.items() if key not in {"entries", "form_stats"}
         },
