@@ -279,7 +279,9 @@ def normalized_text(value: str, strip_html: bool) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
-def truncate_text(value: str, limit: int) -> str:
+def truncate_text(value: str, limit: int | None) -> str:
+    if limit is None:
+        return value
     if len(value) > limit:
         return value[: limit - 1] + "…"
     return value
@@ -336,8 +338,10 @@ def expand_to_token_boundaries(
     return old_start, old_end, new_start, new_end
 
 
-def compact_segment(value: str, limit: int) -> str:
+def compact_segment(value: str, limit: int | None) -> str:
     value = value.strip()
+    if limit is None:
+        return value
     if len(value) <= limit:
         return value
     head = max(1, limit // 2 - 2)
@@ -345,19 +349,23 @@ def compact_segment(value: str, limit: int) -> str:
     return f"{value[:head]}...{value[-tail:]}"
 
 
-def left_context(value: str, end: int, limit: int) -> str:
+def left_context(value: str, end: int, limit: int | None) -> str:
+    if limit is None:
+        return value[:end]
     if end <= limit:
         return value[:end]
     return "… " + value[end - limit : end]
 
 
-def right_context(value: str, start: int, limit: int) -> str:
+def right_context(value: str, start: int, limit: int | None) -> str:
+    if limit is None:
+        return value[start:]
     if len(value) - start <= limit:
         return value[start:]
     return value[start : start + limit] + " …"
 
 
-def inline_text_diff(old_value: str, new_value: str, *, strip_html: bool, context_chars: int = 80) -> str:
+def inline_text_diff(old_value: str, new_value: str, *, strip_html: bool, context_chars: int | None = 80) -> str:
     old_text = normalized_text(old_value, strip_html=strip_html)
     new_text = normalized_text(new_value, strip_html=strip_html)
     if old_text == new_text:
@@ -381,8 +389,9 @@ def inline_text_diff(old_value: str, new_value: str, *, strip_html: bool, contex
     pieces = [
         left_context(new_text, new_start, context_chars),
     ]
-    old_segment = compact_segment(old_text[old_start:old_end], context_chars * 2)
-    new_segment = compact_segment(new_text[new_start:new_end], context_chars * 2)
+    segment_limit = None if context_chars is None else context_chars * 2
+    old_segment = compact_segment(old_text[old_start:old_end], segment_limit)
+    new_segment = compact_segment(new_text[new_start:new_end], segment_limit)
     if old_segment:
         pieces.append(f"[old: {old_segment}]")
     if new_segment:
@@ -391,12 +400,12 @@ def inline_text_diff(old_value: str, new_value: str, *, strip_html: bool, contex
     return re.sub(r"\s+", " ", "".join(pieces)).strip() or "<changed>"
 
 
-def field_diff_summary(old_value: str, new_value: str, preview_limit: int) -> str:
+def field_diff_summary(old_value: str, new_value: str, preview_limit: int | None) -> str:
     diff = truncate_text(inline_text_diff(old_value, new_value, strip_html=True), preview_limit)
     return markdown_code(diff)
 
 
-def template_diff_summary(old_value: str, new_value: str, preview_limit: int) -> str:
+def template_diff_summary(old_value: str, new_value: str, preview_limit: int | None) -> str:
     diff = truncate_text(inline_text_diff(old_value, new_value, strip_html=False, context_chars=120), preview_limit)
     return markdown_code(diff)
 
@@ -410,7 +419,13 @@ def note_field_changes(
     changes: list[str] = []
     field_names = sorted((set(old.fields) | set(new.fields)) - ignored)
     for field_name in field_names:
-        if old.fields.get(field_name, "") != new.fields.get(field_name, ""):
+        old_value = old.fields.get(field_name, "")
+        new_value = new.fields.get(field_name, "")
+        if field_name == "Meaning" and normalized_text(old_value, strip_html=True) == normalized_text(
+            new_value, strip_html=True
+        ):
+            continue
+        if old_value != new_value:
             changes.append(field_name)
     if old.model != new.model:
         changes.append("<notetype>")
@@ -453,7 +468,7 @@ def build_report(
     new: ApkgSnapshot,
     include_build_id: bool,
     limit: int | None,
-    preview_limit: int,
+    preview_limit: int | None,
 ) -> str:
     old_note_keys = set(old.notes)
     new_note_keys = set(new.notes)
