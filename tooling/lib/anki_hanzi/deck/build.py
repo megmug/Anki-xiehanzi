@@ -263,6 +263,21 @@ def _note_tags(tags: set[str]) -> tuple[str, ...]:
     return tuple(sorted(tag for tag in tags if not tag.startswith("source:")))
 
 
+def _assert_unique_form_display_pinyin(word: LexiconWord, forms: list[LexiconForm]) -> None:
+    seen: dict[str, LexiconForm] = {}
+    for form in forms:
+        display_pinyin = _resolve_display_pinyin(form).strip()
+        if not display_pinyin:
+            continue
+        existing = seen.get(display_pinyin)
+        if existing is not None and existing is not form:
+            raise ValueError(
+                f"Word {word.simplified!r} has multiple forms with display Pinyin "
+                f"{display_pinyin!r}: {existing.pinyin!r} and {form.pinyin!r}"
+            )
+        seen[display_pinyin] = form
+
+
 def _selected_meaning_forms(
     word: LexiconWord,
     forms: list[LexiconForm],
@@ -370,6 +385,7 @@ def build_entries_from_state(
         rendered_definition_html = render_meaning_html(word)
 
         forms = word.forms_in_order()
+        _assert_unique_form_display_pinyin(word, forms)
 
         selected_word_forms = _selected_word_forms(
             word=word,
