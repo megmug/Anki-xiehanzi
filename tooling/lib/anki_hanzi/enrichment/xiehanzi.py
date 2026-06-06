@@ -598,32 +598,50 @@ def build_matching_report(
     bucket_matching_pair_counts_before_consumption = matching_pair_bucket_counts_before_consumption()
     bucket_matching_pair_counts_after_consumption = matching_pair_bucket_counts_after_consumption()
 
+    def compact_report_item(item: dict[str, Any]) -> dict[str, Any]:
+        source = item["source"]
+        context = item.get("context", {})
+        source_label = f"{source['simplified']} {source['pinyin']} [{source['deck_level']}]"
+        if source.get("raw_pinyin") and source["raw_pinyin"] != source["pinyin"]:
+            source_label = f"{source_label} raw:{source['raw_pinyin']}"
+        report: dict[str, Any] = {
+            "source_form_id": context.get("source_form_id"),
+            "source": source_label,
+        }
+
+        dictionary = item.get("dictionary")
+        if dictionary is not None:
+            report["target"] = dictionary["pinyin"]
+
+        if context.get("candidate_count_for_source") is not None:
+            report["candidate"] = f"{context.get('candidate_index_for_source')}/{context['candidate_count_for_source']}"
+
+        evidence = item.get("evidence", {})
+        if evidence:
+            report["evidence"] = {}
+            pinyin_evidence = evidence.get("pinyin")
+            if pinyin_evidence is not None:
+                report["evidence"]["pinyin"] = pinyin_evidence["kind"]
+            definition_evidence = evidence.get("definitions")
+            if definition_evidence is not None:
+                report["evidence"]["definitions"] = definition_evidence["kind"]
+                report["definitions"] = {
+                    "source": definition_evidence.get("source_preview", []),
+                    "dictionary": dictionary["definitions_preview"] if dictionary is not None else [],
+                }
+            for extra_key in ("manual_pinyin_override", "spoken_tone_variant"):
+                if extra_key in evidence:
+                    report["evidence"][extra_key] = evidence[extra_key]
+
+        return report
+
     def report_bucket_items(bucket: str) -> list[dict[str, Any]]:
         if not BUCKET_DEFINITIONS[bucket].report_items:
             return []
         items = bucket_results[bucket]["selected_items"]
-        return items if bucket_item_limit is None else items[:bucket_item_limit]
-
-    def matching_rule_report(rule_name: str) -> dict[str, Any]:
-        rule = MATCHING_RULES[rule_name]
-        report: dict[str, Any] = {
-            "name": rule.name,
-            "scope": rule.scope,
-            "requires": list(rule.requires),
-        }
-        if rule.selected_pair is not None:
-            report["selected_pair"] = rule.selected_pair
-        return report
-
-    def consumption_rule_report(rule_name: str | None) -> dict[str, Any] | None:
-        if rule_name is None:
-            return None
-        rule = CONSUMPTION_RULES[rule_name]
-        return {
-            "name": rule.name,
-            "report_only_effect": rule.report_only_effect,
-            "enrichment_effect": rule.enrichment_effect,
-        }
+        if bucket_item_limit is not None:
+            items = items[:bucket_item_limit]
+        return [compact_report_item(item) for item in items]
 
     def bucket_summary_item(definition: BucketDefinition) -> dict[str, Any]:
         bucket = definition.name
@@ -654,53 +672,15 @@ def build_matching_report(
             item["remaining_matching_pair_count"] = sum(default_pinyin_counts.values())
         return item
 
-    def priority_pipeline_item(definition: BucketDefinition) -> dict[str, Any]:
-        bucket = definition.name
-        result = bucket_result(definition)
-        return {
-            "priority": definition.priority,
-            "phase": definition.phase,
-            "bucket": bucket,
-            "description": definition.description,
-            "matching_rules": [matching_rule_report(rule_name) for rule_name in definition.matching_rules],
-            "consumption_rule": consumption_rule_report(definition.consumption_rule),
-            "step_input_source_form_count": result["input_source_form_count"],
-            "step_input_matching_pair_count": result["input_matching_pair_count"],
-            "source_form_count_before_consumption": result["selected_source_form_count"],
-            "source_form_count_after_consumption": selected_source_form_count_after_consumption(result, definition),
-            "matching_pair_count_before_consumption": result["selected_matching_pair_count"],
-            "matching_pair_count_after_consumption": selected_matching_pair_count_after_consumption(result, definition),
-            "consumed_source_form_count": result["consumed_source_form_count"],
-            "consumed_matching_pair_count": result["consumed_matching_pair_count"],
-            "removed_from_remaining_matching_pair_count": result["removed_from_remaining_matching_pair_count"],
-            "remaining_source_form_count_after_step": result["remaining_source_form_count_after_consumption"],
-            "remaining_matching_pair_count_after_step": result["remaining_matching_pair_count_after_consumption"],
-        }
-
     def bucket_report_item(definition: BucketDefinition) -> dict[str, Any]:
         bucket = definition.name
         result = bucket_result(definition)
-        item = {
-            "phase": definition.phase,
+        return {
             "description": definition.description,
-            "matching_rules": [matching_rule_report(rule_name) for rule_name in definition.matching_rules],
-            "consumption_rule": consumption_rule_report(definition.consumption_rule),
-            "step_input_source_form_count": result["input_source_form_count"],
-            "step_input_matching_pair_count": result["input_matching_pair_count"],
-            "source_form_count_before_consumption": result["selected_source_form_count"],
-            "source_form_count_after_consumption": selected_source_form_count_after_consumption(result, definition),
-            "matching_pair_count_before_consumption": result["selected_matching_pair_count"],
-            "matching_pair_count_after_consumption": selected_matching_pair_count_after_consumption(result, definition),
-            "consumed_source_form_count": result["consumed_source_form_count"],
-            "consumed_matching_pair_count": result["consumed_matching_pair_count"],
-            "removed_from_remaining_matching_pair_count": result["removed_from_remaining_matching_pair_count"],
-            "remaining_source_form_count_after_step": result["remaining_source_form_count_after_consumption"],
-            "remaining_matching_pair_count_after_step": result["remaining_matching_pair_count_after_consumption"],
-            "reports_items": definition.report_items,
+            "matching_rules": list(definition.matching_rules),
+            "item_count": result["selected_matching_pair_count"],
+            "items": report_bucket_items(bucket),
         }
-        if definition.report_items:
-            item["items"] = report_bucket_items(bucket)
-        return item
 
     return {
         "schema": "hanzi-matching-report-v1",
@@ -709,8 +689,8 @@ def build_matching_report(
             "Diagnostic xiehanzi-to-CC-CEDICT matching pipeline. "
             "Source prelude rules consume source forms before the pair pipeline starts. "
             "Pair rules then split a shrinking working set before consumption removes source-form redundancies. "
-            "All buckets include overview counts; only default_unresolved contains detailed matching pairs for rule "
-            "design."
+            "All buckets include overview counts; buckets configured with reports_items contain detailed matching "
+            "pairs for rule design."
         ),
         "summary": {
             "raw_source_entries": len(raw_entries),
@@ -752,7 +732,6 @@ def build_matching_report(
             "default_matching_pair_pinyin_evidence_counts": dict(sorted(default_pinyin_counts.items())),
             "bucket_item_limit": bucket_item_limit,
         },
-        "priority_pipeline": [priority_pipeline_item(definition) for definition in bucket_definitions_by_priority()],
         "pair_materialization": {
             "virtual_start_bucket": {
                 "description": "Logical source-form x dictionary-form universe; never materialized.",
@@ -805,7 +784,11 @@ def build_matching_report(
                 "missing": "Source or dictionary definitions are missing.",
             },
         },
-        "buckets": {definition.name: bucket_report_item(definition) for definition in bucket_definitions_by_priority()},
+        "buckets": {
+            definition.name: bucket_report_item(definition)
+            for definition in bucket_definitions_by_priority()
+            if definition.report_items
+        },
     }
 
 
