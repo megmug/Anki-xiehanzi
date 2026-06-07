@@ -14,9 +14,10 @@ Current intentional policy:
 - Cards are matched by NoteID. For old source notes without a NoteID field,
   the key is derived from kind + Simplified + Pinyin using the current deck builder rule.
 - Cards can be matched loosely by kind, Simplified, and Pinyin if an old source
-  note cannot produce the generated NoteID. Pinyin and Write cards are matched
-  loosely by kind and Simplified only, because newer Pinyin/Write cards are
-  word-level and can contain multiple valid readings.
+  note cannot produce the generated NoteID. Meaning cards with multiple slash-
+  separated Pinyin readings are indexed by each reading. Pinyin and Write cards
+  are matched loosely by kind and Simplified only, because newer Pinyin/Write
+  cards are word-level and can contain multiple valid readings.
 - Other unmatched touched cards are not migrated.
 - For matched source cards:
   - full scheduler state + revlog is copied only for touched cards
@@ -142,6 +143,15 @@ def plain_text(value):
 
 def normalized_match_text(value):
     return re.sub(r"\s+", "", plain_text(value)).lower()
+
+
+def normalized_pinyin_reading_keys(value):
+    keys = []
+    for reading in re.split(r"\s*/\s*", plain_text(value)):
+        key = normalized_match_text(reading)
+        if key and key not in keys:
+            keys.append(key)
+    return keys
 
 
 def split_fields(flds):
@@ -323,18 +333,31 @@ def build_key(fields, kind):
 
 
 def build_loose_key(record):
+    keys = build_loose_keys(record)
+    return keys[0] if keys else None
+
+
+def build_loose_keys(record):
     fields = record.get("fields", {})
     kind = record.get("kind")
     simplified = normalized_match_text(fields.get("Simplified", ""))
     if kind in ("Pinyin", "Write"):
         if not simplified:
-            return None
-        return f"{kind}::{simplified}"
+            return []
+        return [f"{kind}::{simplified}"]
 
-    pinyin = normalized_match_text(fields.get("Pinyin", ""))
-    if not kind or not simplified or not pinyin:
-        return None
-    return f"{kind}::{simplified}::{pinyin}"
+    if not kind or not simplified:
+        return []
+
+    keys = [
+        f"{kind}::{simplified}::{pinyin_key}"
+        for pinyin_key in normalized_pinyin_reading_keys(fields.get("Pinyin", ""))
+    ]
+    full_pinyin_key = normalized_match_text(fields.get("Pinyin", ""))
+    full_key = f"{kind}::{simplified}::{full_pinyin_key}" if full_pinyin_key else None
+    if full_key and full_key not in keys:
+        keys.append(full_key)
+    return keys
 
 
 def card_summary(record):
@@ -343,6 +366,7 @@ def card_summary(record):
     return {
         "key": record.get("key"),
         "loose_key": record.get("loose_key") or build_loose_key(record),
+        "loose_keys": build_loose_keys(record),
         "scope": record.get("scope"),
         "kind": record.get("kind"),
         "note_id_field": fields.get("NoteID", ""),
@@ -561,11 +585,18 @@ def resolve_source_duplicate_keys(source_by_key, source_duplicates):
 def index_by_loose_key(records):
     by_key = {}
     for record in records:
-        key = record.get("loose_key") or build_loose_key(record)
-        if not key:
-            continue
-        by_key.setdefault(key, []).append(record)
+        for key in build_loose_keys(record):
+            by_key.setdefault(key, []).append(record)
     return by_key
+
+
+def unique_records(records):
+    by_key = {}
+    for record in records:
+        key = record.get("key")
+        if key and key not in by_key:
+            by_key[key] = record
+    return list(by_key.values())
 
 
 def build_match_plan(source_by_key, target_by_key):
@@ -591,24 +622,34 @@ def build_match_plan(source_by_key, target_by_key):
 
     for source_key in sorted(set(source_by_key) - set(matches_by_source_key)):
         source_record = source_by_key[source_key]
-        loose_key = source_record.get("loose_key") or build_loose_key(source_record)
-        if not loose_key:
+        loose_keys = build_loose_keys(source_record)
+        if not loose_keys:
             continue
 
-        candidates = [
-            record
-            for record in loose_target_index.get(loose_key, [])
-            if record.get("key") not in matched_target_keys
-        ]
+        candidates = unique_records(
+            [
+                record
+                for loose_key in loose_keys
+                for record in loose_target_index.get(loose_key, [])
+                if record.get("key") not in matched_target_keys
+            ]
+        )
         if len(candidates) != 1:
             continue
 
         target_key = candidates[0]["key"]
+        matched_loose_keys = [
+            loose_key
+            for loose_key in loose_keys
+            if candidates[0] in loose_target_index.get(loose_key, [])
+        ]
         matches_by_source_key[source_key] = {
             "source_key": source_key,
             "target_key": target_key,
             "match_type": "loose",
-            "loose_key": loose_key,
+            "loose_key": matched_loose_keys[0] if matched_loose_keys else loose_keys[0],
+            "loose_keys": loose_keys,
+            "matched_loose_keys": matched_loose_keys,
         }
         matched_target_keys.add(target_key)
 
