@@ -19,9 +19,9 @@ and commit the changed snapshot, manifest, and reports if the new data is
 intentional.
 
 - Source URL: `https://www.mdbg.net/chinese/export/cedict/cedict_1_0_ts_utf-8_mdbg.zip`
-- Snapshot date from file header: `2026-05-28T00:40:39Z`
-- Entries from file header: `124972`
+- Snapshot date from file header: `2026-06-07T08:36:25Z`
+- Entries from file header: `125015`
 - Publisher from file header: `MDBG`
 - Snapshot file: `cedict_ts.u8`
-- Snapshot SHA256: `d5a4758577c0ad602c64b6258212563c1871978cf1ac86e450926115ec6c5e95`
+- Snapshot SHA256: `0e1badabb399747d646f1617c6abe86e8ac2ec013531999da745650575fa5390`
 - License: https://creativecommons.org/licenses/by-sa/4.0/
