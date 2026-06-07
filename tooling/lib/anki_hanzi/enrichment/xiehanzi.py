@@ -112,8 +112,8 @@ BUCKET_DESCRIPTIONS = {
         "from the xiehanzi source entry."
     ),
     "default_unresolved": (
-        "No higher-priority bucket resolved the source form. All remaining candidate pairs are shown for rule design "
-        "and the source form still receives legacy fallback enrichment."
+        "No higher-priority bucket resolved the source form. This bucket must stay empty; the build aborts if any "
+        "matching pairs reach it."
     ),
 }
 
@@ -239,7 +239,7 @@ BUCKET_DEFINITIONS = {
         description=BUCKET_DESCRIPTIONS["default_unresolved"],
         report_items=True,
         matching_rules=("default_unresolved",),
-        consumption_rule="apply_legacy_enrichment_fallback",
+        consumption_rule="assert_default_unresolved_empty",
     ),
 }
 
@@ -785,9 +785,7 @@ def build_matching_report(
             ),
             "resolved_source_forms": len(consumed_by_source_form),
             "unresolved_source_forms": bucket_results["default_unresolved"]["selected_source_form_count"],
-            "default_unresolved_source_forms_before_fallback": bucket_results["default_unresolved"][
-                "selected_source_form_count"
-            ],
+            "default_unresolved_source_forms": bucket_results["default_unresolved"]["selected_source_form_count"],
             "open_unresolved_source_forms_after_consumption": bucket_results["default_unresolved"][
                 "remaining_source_form_count_after_consumption"
             ],
@@ -855,8 +853,6 @@ def group_non_exact_matches(records: list[dict[str, Any]]) -> dict[str, list[dic
         "format_variant": [],
         "case_variant": [],
         "reading_variant": [],
-        "toneless": [],
-        "created": [],
     }
     for record in records:
         groups.setdefault(record["match_type"], []).append(record)
@@ -887,13 +883,12 @@ def enrich_state(
         pipeline=matching_pipeline,
     )
 
-    missing_raw_before_stubs = [
+    missing_raw_entries = [
         entry_summary(entry) for entry in raw_entries if entry["simplified"] not in base_word_index
     ]
     pipeline_enrichment = apply_pipeline_enrichment_to_state(master_state, deck_entries, matching_pipeline)
-    missing_deck_entries_before_stubs = pipeline_enrichment["missing_deck_entries_before_stubs"]
+    missing_deck_entries = pipeline_enrichment["missing_deck_entries"]
     synthetic_words = pipeline_enrichment["synthetic_words"]
-    missing_deck_after_stubs = pipeline_enrichment["missing_deck_after_pipeline"]
     form_stats = pipeline_enrichment["form_stats"]
     frequency_enrichment = apply_frequency_enrichment_to_state(master_state, frequency_list_path)
     master_state.hanzi_dropped_duplicates = dropped_duplicates
@@ -913,11 +908,10 @@ def enrich_state(
         "raw_hanzi_entries": len(raw_entries),
         "deck_entries_after_dedupe": len(deck_entries),
         "dropped_duplicate_entries": len(dropped_duplicates),
-        "raw_entries_missing_base_word": len(missing_raw_before_stubs),
-        "deck_entries_missing_base_word": len(missing_deck_entries_before_stubs),
-        "deck_entries_missing_enriched_word": len(missing_deck_after_stubs),
+        "raw_entries_missing_base_word": len(missing_raw_entries),
+        "deck_entries_missing_base_word": len(missing_deck_entries),
         "deck_entries_by_level": summarize_by_level(deck_entries),
-        "hanzi_form_targets": form_stats["matched"] + form_stats["created"],
+        "hanzi_form_targets": form_stats["matched"],
         "hanzi_form_matches": form_stats["matched"],
         "hanzi_form_exact_matches": form_stats["match_types"]["exact"],
         "hanzi_form_format_variant_matches": form_stats["match_types"]["format_variant"],
@@ -933,8 +927,6 @@ def enrich_state(
             "html_subform_definition_cover"
         ],
         "hanzi_form_pinyin_variant_matches": form_stats["matched_pinyin_variant"],
-        "hanzi_form_toneless_matches": form_stats["matched_toneless"],
-        "hanzi_form_stubs_created": form_stats["created"],
         "hanzi_non_exact_matches": len(form_stats["non_exact_matches"]),
         "hanzi_non_exact_definition_mismatches": len(form_stats["non_exact_definition_mismatches"]),
         "hanzi_pinyin_case_preserved": len(form_stats["pinyin_case_preserved"]),
@@ -1008,10 +1000,9 @@ def enrich_state(
         },
         "frequency_enrichment": frequency_enrichment,
         "samples": {
-            "missing_raw_entries": missing_raw_before_stubs[:25],
-            "missing_deck_entries": [entry_summary(entry) for entry in missing_deck_entries_before_stubs[:25]],
+            "missing_raw_entries": missing_raw_entries[:25],
+            "missing_deck_entries": [entry_summary(entry) for entry in missing_deck_entries[:25]],
             "synthetic_words": [word.to_enriched_json() for word in synthetic_words[:25]],
-            "missing_deck_entries_after_stubs": missing_deck_after_stubs[:25],
             "perfect_match_entries": pipeline_enrichment["perfect_match"]["entries"][:25],
             "manual_pinyin_override_entries": pipeline_enrichment["manual_pinyin_override"]["entries"][:25],
             "format_variant_unique_entries": pipeline_enrichment["format_variant_unique"]["entries"][:25],
@@ -1032,8 +1023,6 @@ def enrich_state(
             "html_subform_definition_cover_targets": pipeline_enrichment["html_subform_definition_cover"][
                 "matched_targets"
             ][:25],
-            "default_fallback_entries": pipeline_enrichment["default_fallback_entries"][:25],
-            "hanzi_form_stubs": form_stats["created_entries"],
             "hanzi_non_exact_definition_mismatches": form_stats["non_exact_definition_mismatches"],
             "hanzi_non_exact_definition_mismatches_by_type": group_non_exact_matches(
                 form_stats["non_exact_definition_mismatches"]
