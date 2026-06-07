@@ -247,10 +247,8 @@ def _resolve_display_pinyin_readings(form: LexiconForm) -> list[str]:
     return readings
 
 
-def _effective_form_tags(word: LexiconWord, form: LexiconForm) -> set[str]:
-    form_tags = set(form.tags)
-    fallback_tags = set(word.tags)
-    return form_tags or fallback_tags
+def _form_selection_tags(form: LexiconForm) -> set[str]:
+    return set(form.tags)
 
 
 def _is_form_selected(
@@ -269,7 +267,7 @@ def _is_form_selected(
 
 
 def _note_tags(tags: set[str]) -> tuple[str, ...]:
-    return tuple(sorted(tag for tag in tags if not tag.startswith("source:")))
+    return tuple(sorted(tags))
 
 
 def _assert_unique_form_display_pinyin(word: LexiconWord, forms: list[LexiconForm]) -> None:
@@ -298,7 +296,7 @@ def _selected_meaning_forms(
         if not display_pinyin.strip():
             continue
 
-        effective_tags = _effective_form_tags(word, form)
+        effective_tags = _form_selection_tags(form)
         if _is_form_selected(effective_tags, mode, selection_tags, is_individual):
             selected_forms.append(
                 MeaningFormEntry(
@@ -697,9 +695,5 @@ def build_package(
         "dropped_duplicates": list(state.hanzi_dropped_duplicates),
         "missing_audio_files": missing_audio,
     }
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    write_json(report_path, report)
     return report

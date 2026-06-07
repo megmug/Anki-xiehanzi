@@ -10,7 +10,7 @@ Compared with upstream, this fork currently:
 
 - builds an APKG from the current CC-CEDICT snapshot, with the default config selecting the New HSK (2025) / HSK 3.0 word list;
 - generates only the active Meaning, Pinyin, and Write card families, without sentence cards or a separate audio-only card type;
-- keeps note fields deliberately small: Simplified, Pinyin, Meaning, Audio, NoteID, and BuildID - no Zhuyin, no Traditional;
+- keeps note fields deliberately small: Simplified, Pinyin, Meaning, Audio, NoteID, and BuildID;
 - adds tags such as `hanzi::hsk::1` and `hanzi::freq::top2500`, and uses one subdeck per card type;
 - makes deck generation configurable so any set of tagged cards or individual words from the CC-CEDICT snapshot can be included, up to and including a full CC-CEDICT deck of roughly 360k cards, if so desired (not recommended);
 - deduplicates the original data to avoid redundancy;
@@ -51,13 +51,12 @@ git submodule update --init --recursive
 
 Then build the APKG with Nix:
 ```sh
-nix-build --no-sandbox
+nix-build
 ```
-Depending on your Nix configuration, `--no-sandbox` may require your account to be a trusted user.
-Refer to the Nix documentation if you need to configure this.
 
 On a Linux machine with an NVIDIA GPU and `audio.engine` set to `kokoro`, Nix probes for a usable CUDA driver and can install CUDA-capable PyTorch into the build's isolated temporary `pip` prefix.
 If no NVIDIA driver is available, or on macOS, the build uses CPU PyTorch.
+Audio builds that need network access for model downloads may require a relaxed Nix sandbox configuration.
 
 `nix-build` creates the default `result` symlink.
 The build result contains the hash-named APKG, generated reports, including the xiehanzi-to-CC-CEDICT matching report, and any checked-in migration scripts.

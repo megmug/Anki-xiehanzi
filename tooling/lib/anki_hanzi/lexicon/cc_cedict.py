@@ -11,7 +11,7 @@ from typing import Any
 from anki_hanzi.lexicon.state import LexiconSource, LexiconState, LexiconWord, ParseSummary
 
 
-LINE_RE = re.compile(r"^(?P<traditional>\S+)\s+(?P<simplified>\S+)\s+\[(?P<pinyin>.+?)\]\s+/(?P<definitions>.*)/$")
+LINE_RE = re.compile(r"^\S+\s+(?P<simplified>\S+)\s+\[(?P<pinyin>.+?)\]\s+/(?P<definitions>.*)/$")
 MISSING_IDEOGRAPH_PLACEHOLDERS = frozenset({"□"})
 
 
@@ -61,9 +61,8 @@ def parse_cedict_text(
             rejected_count += 1
             continue
 
-        traditional = match.group("traditional")
         simplified = match.group("simplified")
-        if has_missing_ideograph_placeholder(traditional) or has_missing_ideograph_placeholder(simplified):
+        if has_missing_ideograph_placeholder(simplified):
             skipped_placeholder_count += 1
             continue
 
@@ -74,7 +73,6 @@ def parse_cedict_text(
             words[simplified] = word
 
         word.add_entry(
-            traditional=traditional,
             pinyin=parse_pinyin(match.group("pinyin")),
             definitions=split_definitions(match.group("definitions")),
         )

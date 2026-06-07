@@ -103,10 +103,6 @@ class AudioGenerator:
         filenames = [AUDIO_FILENAME_TEMPLATES[voice.slot].format(text=text) for voice in self.backend.voices]
         return tuple(filenames)  # type: ignore[return-value]
 
-    def audio_ref_for_text(self, text: str) -> str:
-        filenames = [filename for filename in self.filenames_for_text(text) if filename]
-        return "".join(f"[sound:{filename}]" for filename in filenames)
-
     def jobs_for_texts(self, texts: Iterable[str]) -> list[AudioJob]:
         jobs: list[AudioJob] = []
         if not self.enabled:

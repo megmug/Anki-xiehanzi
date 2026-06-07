@@ -143,9 +143,7 @@ def source_pinyin_in_dictionary_format(source_pinyin: str, dictionary_pinyin: st
 def entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
     summary = {
         "simplified": entry["simplified"],
-        "traditional": entry["traditional"],
         "pinyin": entry["pinyin"],
-        "zhuyin": entry["zhuyin"],
         "deck_level": entry["deck_level"],
         "raw_level": entry["raw_level"],
         "source": entry["source"],
@@ -157,10 +155,6 @@ def entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
     return summary
 
 
-def form_pinyin_reading_string(form: LexiconForm) -> str:
-    return " / ".join(form.pinyin_readings or [form.pinyin])
-
-
 def build_synthetic_words(missing_entries: list[dict[str, Any]]) -> list[LexiconWord]:
     by_simplified: dict[str, LexiconWord] = {}
 
@@ -168,24 +162,17 @@ def build_synthetic_words(missing_entries: list[dict[str, Any]]) -> list[Lexicon
         simplified = entry["simplified"]
         word = by_simplified.get(simplified)
         if word is None:
-            word = LexiconWord(simplified=simplified, tags=["source:xiehanzi"])
+            word = LexiconWord(simplified=simplified)
             by_simplified[simplified] = word
 
         word.add_tags(entry["tags"])
         word.set_hanzi_frequency_once(entry["frequency"])
-
-        traditional = entry["traditional"]
-        if traditional and traditional not in word.traditional_variants:
-            word.traditional_variants.append(traditional)
 
         form_key = numbered_pinyin(entry["pinyin"])
         form = word.forms.get(form_key)
         if form is None:
             form = LexiconForm(pinyin=form_key, tags=[])
             word.forms[form_key] = form
-
-        if traditional and traditional not in form.traditional_variants:
-            form.traditional_variants.append(traditional)
 
         form.append_definitions(definitions_from_meaning_html(entry["meaning_html"]))
         form.add_tags(entry["tags"])
@@ -196,18 +183,8 @@ def build_synthetic_words(missing_entries: list[dict[str, Any]]) -> list[Lexicon
     return sorted(by_simplified.values(), key=lambda word: word.simplified)
 
 
-def prefer_first(values: list[str], value: str) -> None:
-    if not value:
-        return
-    if value in values:
-        values.remove(value)
-    values.insert(0, value)
-
-
 def record_form_match(form_stats: dict[str, Any], match_type: str) -> None:
     form_stats["match_types"][match_type] += 1
-    if match_type == "reading_variant":
-        form_stats["matched_pinyin_variant"] += 1
 
 
 def pinyin_formatting_key(value: str) -> str:
@@ -299,12 +276,10 @@ def definitions_differ(left: list[str], right: list[str]) -> bool:
 def new_form_stats() -> dict[str, Any]:
     return {
         "matched": 0,
-        "matched_pinyin_variant": 0,
         "match_types": {
             "exact": 0,
             "format_variant": 0,
             "case_variant": 0,
-            "reading_variant": 0,
             "spoken_tone_variant": 0,
             "exact_definition": 0,
             "exact_definition_also_pr": 0,
@@ -369,69 +344,6 @@ def drop_source_form_pairs(
     }
 
 
-def drop_perfect_match_source_form_pairs(
-    selected_items: list[dict[str, Any]],
-    remaining_items: list[dict[str, Any]],
-) -> dict[str, Any]:
-    return drop_source_form_pairs(selected_items, remaining_items)
-
-
-def drop_manual_pinyin_override_source_form_pairs(
-    selected_items: list[dict[str, Any]],
-    remaining_items: list[dict[str, Any]],
-) -> dict[str, Any]:
-    return drop_source_form_pairs(selected_items, remaining_items)
-
-
-def drop_format_variant_source_form_pairs(
-    selected_items: list[dict[str, Any]],
-    remaining_items: list[dict[str, Any]],
-) -> dict[str, Any]:
-    return drop_source_form_pairs(selected_items, remaining_items)
-
-
-def consume_spoken_tone_variant_source_form_pairs(
-    selected_items: list[dict[str, Any]],
-    remaining_items: list[dict[str, Any]],
-) -> dict[str, Any]:
-    return drop_source_form_pairs(selected_items, remaining_items)
-
-
-def drop_case_variant_exact_definition_source_form_pairs(
-    selected_items: list[dict[str, Any]],
-    remaining_items: list[dict[str, Any]],
-) -> dict[str, Any]:
-    return drop_source_form_pairs(selected_items, remaining_items)
-
-
-def drop_exact_definition_also_pr_source_form_pairs(
-    selected_items: list[dict[str, Any]],
-    remaining_items: list[dict[str, Any]],
-) -> dict[str, Any]:
-    return drop_source_form_pairs(selected_items, remaining_items)
-
-
-def drop_exact_definition_source_form_pairs(
-    selected_items: list[dict[str, Any]],
-    remaining_items: list[dict[str, Any]],
-) -> dict[str, Any]:
-    return drop_source_form_pairs(selected_items, remaining_items)
-
-
-def drop_semicolon_split_exact_definition_also_pr_source_form_pairs(
-    selected_items: list[dict[str, Any]],
-    remaining_items: list[dict[str, Any]],
-) -> dict[str, Any]:
-    return drop_source_form_pairs(selected_items, remaining_items)
-
-
-def drop_html_subform_definition_cover_source_form_pairs(
-    selected_items: list[dict[str, Any]],
-    remaining_items: list[dict[str, Any]],
-) -> dict[str, Any]:
-    return drop_source_form_pairs(selected_items, remaining_items)
-
-
 def assert_default_unresolved_empty_pairs(
     selected_items: list[dict[str, Any]],
     remaining_items: list[dict[str, Any]],
@@ -470,49 +382,49 @@ CONSUMPTION_RULES = {
         name="drop_perfect_match_source_form_pairs",
         report_only_effect="remove all remaining matching pairs for the consumed source form",
         enrichment_effect="apply exact-pair tags and metadata directly to the selected dictionary form",
-        handler=drop_perfect_match_source_form_pairs,
+        handler=drop_source_form_pairs,
     ),
     "drop_manual_pinyin_override_source_form_pairs": ConsumptionRuleDefinition(
         name="drop_manual_pinyin_override_source_form_pairs",
         report_only_effect="remove all remaining matching pairs for the manually corrected source form",
         enrichment_effect="apply the configured Pinyin override directly to the selected dictionary form",
-        handler=drop_manual_pinyin_override_source_form_pairs,
+        handler=drop_source_form_pairs,
     ),
     "drop_format_variant_source_form_pairs": ConsumptionRuleDefinition(
         name="drop_format_variant_source_form_pairs",
         report_only_effect="remove all remaining matching pairs for the format-variant source form",
         enrichment_effect="apply tags and metadata directly to the selected dictionary form without changing Pinyin",
-        handler=drop_format_variant_source_form_pairs,
+        handler=drop_source_form_pairs,
     ),
     "consume_spoken_tone_variant_source_form_pairs": ConsumptionRuleDefinition(
         name="consume_spoken_tone_variant_source_form_pairs",
         report_only_effect="remove all remaining matching pairs for the spoken-tone-variant source form",
         enrichment_effect="add the source Pinyin as an accepted reading on the selected dictionary form",
-        handler=consume_spoken_tone_variant_source_form_pairs,
+        handler=drop_source_form_pairs,
     ),
     "drop_case_variant_exact_definition_source_form_pairs": ConsumptionRuleDefinition(
         name="drop_case_variant_exact_definition_source_form_pairs",
         report_only_effect="remove all remaining matching pairs for the exact-definition case-variant source form",
         enrichment_effect="apply tags and metadata directly to the selected dictionary form without changing Pinyin",
-        handler=drop_case_variant_exact_definition_source_form_pairs,
+        handler=drop_source_form_pairs,
     ),
     "drop_exact_definition_also_pr_source_form_pairs": ConsumptionRuleDefinition(
         name="drop_exact_definition_also_pr_source_form_pairs",
         report_only_effect="remove all remaining matching pairs for the exact-definition also-pr source form",
         enrichment_effect="apply tags and metadata directly and add explicitly attested also-pr readings",
-        handler=drop_exact_definition_also_pr_source_form_pairs,
+        handler=drop_source_form_pairs,
     ),
     "drop_exact_definition_source_form_pairs": ConsumptionRuleDefinition(
         name="drop_exact_definition_source_form_pairs",
         report_only_effect="remove all remaining matching pairs for the exact-definition source form",
         enrichment_effect="apply tags and metadata directly to the selected dictionary form without changing Pinyin",
-        handler=drop_exact_definition_source_form_pairs,
+        handler=drop_source_form_pairs,
     ),
     "drop_semicolon_split_exact_definition_also_pr_source_form_pairs": ConsumptionRuleDefinition(
         name="drop_semicolon_split_exact_definition_also_pr_source_form_pairs",
         report_only_effect="remove all remaining matching pairs for the semicolon-split exact-definition also-pr form",
         enrichment_effect="apply tags and metadata directly and add explicitly attested also-pr readings",
-        handler=drop_semicolon_split_exact_definition_also_pr_source_form_pairs,
+        handler=drop_source_form_pairs,
     ),
     "drop_html_subform_definition_cover_source_form_pairs": ConsumptionRuleDefinition(
         name="drop_html_subform_definition_cover_source_form_pairs",
@@ -520,7 +432,7 @@ CONSUMPTION_RULES = {
         enrichment_effect=(
             "apply tags and metadata directly to every dictionary form covered by xiehanzi HTML subforms"
         ),
-        handler=drop_html_subform_definition_cover_source_form_pairs,
+        handler=drop_source_form_pairs,
     ),
     "assert_default_unresolved_empty": ConsumptionRuleDefinition(
         name="assert_default_unresolved_empty",
@@ -587,7 +499,6 @@ def target_identity(target: dict[str, Any]) -> tuple[str, str]:
 def apply_entry_metadata_to_selected_form(word: LexiconWord, form: LexiconForm, entry: dict[str, Any]) -> None:
     word.add_tags(entry["tags"])
     word.set_hanzi_frequency_once(entry["frequency"])
-    prefer_first(form.traditional_variants, entry["traditional"])
     form.add_tags(entry["tags"])
 
 
@@ -650,7 +561,7 @@ def consume_perfect_match_bucket(
     for item in sorted(selected_items, key=pair_source_form_id):
         word, form, _, _ = target_word_and_form_from_pair(state, item)
         entry = deck_entry_for_pair(deck_entries, item)
-        if pinyin_rule_kind(entry["pinyin"], form_pinyin_reading_string(form)) != "exact":
+        if pinyin_rule_kind(entry["pinyin"], form.pinyin_reading_string) != "exact":
             raise ValueError(f"Perfect-match bucket selected a non-exact pair: {item!r}")
         apply_entry_metadata_to_selected_form(word, form, entry)
         form_stats["matched"] += 1
@@ -677,7 +588,7 @@ def consume_manual_pinyin_override_bucket(
         word, form, _, form_key = target_word_and_form_from_pair(state, item)
         entry = deck_entry_with_manual_pinyin_override(deck_entries, item)
         old_pinyin = form.pinyin
-        match_type = pinyin_rule_kind(entry["pinyin"], form_pinyin_reading_string(form))
+        match_type = pinyin_rule_kind(entry["pinyin"], form.pinyin_reading_string)
         if match_type not in {"exact", "format_variant"}:
             raise ValueError(f"Manual Pinyin override no longer matches the selected target form: {item!r}")
 
@@ -699,7 +610,6 @@ def consume_manual_pinyin_override_bucket(
             if definitions_differ(match_record["cc_cedict_definitions"], match_record["xiehanzi_definitions"]):
                 form_stats["non_exact_definition_mismatches"].append(match_record)
 
-        prefer_first(form.traditional_variants, entry["traditional"])
         form.add_tags(entry["tags"])
 
         new_pinyin = xiehanzi_pinyin
@@ -754,7 +664,7 @@ def consume_format_variant_bucket(
     for item in sorted(selected_items, key=pair_source_form_id):
         word, form, _, _ = target_word_and_form_from_pair(state, item)
         entry = deck_entry_for_pair(deck_entries, item)
-        if pinyin_rule_kind(entry["pinyin"], form_pinyin_reading_string(form)) != "format_variant":
+        if pinyin_rule_kind(entry["pinyin"], form.pinyin_reading_string) != "format_variant":
             raise ValueError(f"Format-variant bucket selected a non-format-variant pair: {item!r}")
         apply_entry_metadata_to_selected_form(word, form, entry)
         form_stats["matched"] += 1
@@ -786,7 +696,7 @@ def consume_spoken_tone_variant_bucket(
 
         word, form, _, _ = target_word_and_form_from_pair(state, item)
         entry = deck_entry_for_pair(deck_entries, item)
-        dictionary_pinyin = form_pinyin_reading_string(form)
+        dictionary_pinyin = form.pinyin_reading_string
         if pinyin_rule_kind(entry["pinyin"], dictionary_pinyin) != "toneless":
             raise ValueError(f"Spoken-tone-variant bucket selected a non-toneless pair: {item!r}")
         apply_entry_metadata_to_selected_form(word, form, entry)
@@ -832,7 +742,7 @@ def consume_case_variant_exact_definition_bucket(
     for item in sorted(selected_items, key=pair_source_form_id):
         word, form, _, _ = target_word_and_form_from_pair(state, item)
         entry = deck_entry_for_pair(deck_entries, item)
-        if pinyin_rule_kind(entry["pinyin"], form_pinyin_reading_string(form)) != "case_variant":
+        if pinyin_rule_kind(entry["pinyin"], form.pinyin_reading_string) != "case_variant":
             raise ValueError(f"Case-variant bucket selected a non-case-variant pair: {item!r}")
         if not definition_sets_exact(definitions_from_meaning_html(entry["meaning_html"]), list(form.definitions)):
             raise ValueError(f"Case-variant bucket selected a non-exact-definition pair: {item!r}")
@@ -885,10 +795,7 @@ def matching_also_pr_reading_values(item: dict[str, Any], context_key: str) -> l
     if not context:
         raise ValueError(f"{context_key} bucket item lacks also-pr context: {item!r}")
 
-    extra_keys = {
-        compact_lower_pinyin_key_from_record(record)
-        for record in context.get("extra_source_readings", [])
-    }
+    extra_keys = {compact_lower_pinyin_key_from_record(record) for record in context.get("extra_source_readings", [])}
     also_pr_by_key = {
         compact_lower_pinyin_key_from_record(record): str(record.get("strict") or "")
         for record in context.get("also_pr_readings", [])
@@ -1212,93 +1119,34 @@ def apply_pipeline_enrichment_to_state(
     deck_entries: list[dict[str, Any]],
     pipeline: dict[str, Any],
 ) -> dict[str, Any]:
-    missing_dictionary_word = STATE_CONSUMPTION_RULES["missing_dictionary_word"].handler(
-        state,
-        deck_entries,
-        pipeline,
-    )
-
+    bucket_results: dict[str, dict[str, Any]] = {}
     form_stats = new_form_stats()
-    perfect_match_stats = STATE_CONSUMPTION_RULES["perfect_match"].handler(
-        state=state,
-        deck_entries=deck_entries,
-        pipeline=pipeline,
-        form_stats=form_stats,
-    )
 
-    manual_pinyin_override_stats = STATE_CONSUMPTION_RULES["manual_pinyin_override"].handler(
-        state=state,
-        deck_entries=deck_entries,
-        pipeline=pipeline,
-        form_stats=form_stats,
-    )
-    form_stats = manual_pinyin_override_stats["form_stats"]
+    for bucket, rule in STATE_CONSUMPTION_RULES.items():
+        if rule.bucket != bucket:
+            raise ValueError(f"State consumption rule {rule.name!r} is registered under the wrong bucket {bucket!r}")
+        if bucket == "missing_dictionary_word":
+            result = rule.handler(state, deck_entries, pipeline)
+        else:
+            result = rule.handler(
+                state=state,
+                deck_entries=deck_entries,
+                pipeline=pipeline,
+                form_stats=form_stats,
+            )
+            form_stats = result.get("form_stats", form_stats)
+        result.setdefault("state_effect", rule.state_effect)
+        result["state_consumption_rule"] = rule.name
+        bucket_results[bucket] = result
 
-    format_variant_stats = STATE_CONSUMPTION_RULES["format_variant_unique"].handler(
-        state=state,
-        deck_entries=deck_entries,
-        pipeline=pipeline,
-        form_stats=form_stats,
-    )
-    form_stats = format_variant_stats["form_stats"]
+    missing_dictionary_word = bucket_results["missing_dictionary_word"]
+    default_unresolved = bucket_results["default_unresolved"]
 
-    spoken_tone_variant = STATE_CONSUMPTION_RULES["spoken_tone_variant"].handler(
-        state=state,
-        deck_entries=deck_entries,
-        pipeline=pipeline,
-        form_stats=form_stats,
-    )
-    form_stats = spoken_tone_variant["form_stats"]
-
-    case_variant_exact_definition = STATE_CONSUMPTION_RULES["case_variant_exact_definition"].handler(
-        state=state,
-        deck_entries=deck_entries,
-        pipeline=pipeline,
-        form_stats=form_stats,
-    )
-    form_stats = case_variant_exact_definition["form_stats"]
-
-    exact_definition_also_pr = STATE_CONSUMPTION_RULES["exact_definition_also_pr"].handler(
-        state=state,
-        deck_entries=deck_entries,
-        pipeline=pipeline,
-        form_stats=form_stats,
-    )
-    form_stats = exact_definition_also_pr["form_stats"]
-
-    exact_definition = STATE_CONSUMPTION_RULES["exact_definition"].handler(
-        state=state,
-        deck_entries=deck_entries,
-        pipeline=pipeline,
-        form_stats=form_stats,
-    )
-    form_stats = exact_definition["form_stats"]
-
-    semicolon_split_exact_definition_also_pr = STATE_CONSUMPTION_RULES[
-        "semicolon_split_exact_definition_also_pr"
-    ].handler(
-        state=state,
-        deck_entries=deck_entries,
-        pipeline=pipeline,
-        form_stats=form_stats,
-    )
-    form_stats = semicolon_split_exact_definition_also_pr["form_stats"]
-
-    html_subform_definition_cover = STATE_CONSUMPTION_RULES["html_subform_definition_cover"].handler(
-        state=state,
-        deck_entries=deck_entries,
-        pipeline=pipeline,
-        form_stats=form_stats,
-    )
-    form_stats = html_subform_definition_cover["form_stats"]
-
-    default_unresolved = STATE_CONSUMPTION_RULES["default_unresolved"].handler(
-        state=state,
-        deck_entries=deck_entries,
-        pipeline=pipeline,
-        form_stats=form_stats,
-    )
-    form_stats = default_unresolved["form_stats"]
+    output: dict[str, Any] = {
+        bucket: result
+        for bucket, result in bucket_results.items()
+        if bucket not in {"missing_dictionary_word", "default_unresolved"}
+    }
 
     return {
         "synthetic_words": missing_dictionary_word["synthetic_words"],
@@ -1306,15 +1154,7 @@ def apply_pipeline_enrichment_to_state(
             key: value for key, value in missing_dictionary_word.items() if key != "synthetic_words"
         },
         "missing_deck_entries": missing_dictionary_word["entries"],
-        "perfect_match": perfect_match_stats,
-        "manual_pinyin_override": manual_pinyin_override_stats,
-        "format_variant_unique": format_variant_stats,
-        "spoken_tone_variant": spoken_tone_variant,
-        "case_variant_exact_definition": case_variant_exact_definition,
-        "exact_definition_also_pr": exact_definition_also_pr,
-        "exact_definition": exact_definition,
-        "semicolon_split_exact_definition_also_pr": semicolon_split_exact_definition_also_pr,
-        "html_subform_definition_cover": html_subform_definition_cover,
+        **output,
         "default_unresolved": {
             key: value for key, value in default_unresolved.items() if key not in {"entries", "form_stats"}
         },

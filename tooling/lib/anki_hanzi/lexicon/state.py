@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 
-ENRICHED_LEXICON_SCHEMA = "hanzi-enriched-lexicon-v1"
+ENRICHED_LEXICON_SCHEMA = "hanzi-enriched-lexicon-v2"
 
 
 def split_pinyin_readings(value: Any) -> list[str]:
@@ -32,6 +32,10 @@ def normalize_single_pinyin(value: Any) -> str:
 
 def sorted_pinyin_readings(values: list[str]) -> list[str]:
     return sorted(dict.fromkeys(values), key=lambda value: (value.casefold(), value))
+
+
+def normalized_tags(values: list[str]) -> list[str]:
+    return sorted({tag for value in values if (tag := str(value).strip()) and not tag.startswith("source:")})
 
 
 @dataclass(frozen=True)
@@ -127,9 +131,8 @@ class LexiconEnrichmentMetadata:
 class LexiconForm:
     pinyin: str
     pinyin_readings: list[str] = field(default_factory=list)
-    traditional_variants: list[str] = field(default_factory=list)
     definitions: list[str] = field(default_factory=list)
-    tags: list[str] = field(default_factory=lambda: ["source:cc-cedict"])
+    tags: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         primary_reading = normalize_single_pinyin(self.pinyin)
@@ -137,6 +140,7 @@ class LexiconForm:
         all_readings = ([primary_reading] if primary_reading else []) + extra_readings
         self.pinyin = primary_reading or (extra_readings[0] if extra_readings else "")
         self.pinyin_readings = sorted_pinyin_readings(all_readings)
+        self.tags = normalized_tags(self.tags)
 
     def replace_pinyin(self, value: str) -> None:
         reading = normalize_single_pinyin(value)
@@ -159,9 +163,9 @@ class LexiconForm:
     def pinyin_sort_key(self) -> tuple[list[str], str]:
         return (list(self.pinyin_readings), self.pinyin)
 
-    def add_traditional_variant(self, traditional: str) -> None:
-        if traditional not in self.traditional_variants:
-            self.traditional_variants.append(traditional)
+    @property
+    def pinyin_reading_string(self) -> str:
+        return " / ".join(self.pinyin_readings or [self.pinyin])
 
     def append_definitions(self, definitions: list[str]) -> None:
         seen = set(self.definitions)
@@ -173,7 +177,7 @@ class LexiconForm:
 
     def add_tags(self, tags: list[str]) -> None:
         seen = set(self.tags)
-        for tag in tags:
+        for tag in normalized_tags(tags):
             if tag in seen:
                 continue
             self.tags.append(tag)
@@ -185,7 +189,6 @@ class LexiconForm:
             "definitions": list(self.definitions),
             "pinyin": self.pinyin,
             "tags": list(self.tags),
-            "traditional_variants": list(self.traditional_variants),
         }
         if len(self.pinyin_readings) > 1:
             data["pinyin_readings"] = list(self.pinyin_readings)
@@ -205,7 +208,6 @@ class LexiconForm:
         return cls(
             pinyin=str(pinyin),
             pinyin_readings=pinyin_readings,
-            traditional_variants=[str(value) for value in data.get("traditional_variants", [])],
             definitions=[str(value) for value in data.get("definitions", [])],
             tags=[str(value) for value in data.get("tags", [])],
         )
@@ -214,23 +216,21 @@ class LexiconForm:
 @dataclass
 class LexiconWord:
     simplified: str
-    traditional_variants: list[str] = field(default_factory=list)
     forms: dict[str, LexiconForm] = field(default_factory=dict)
-    tags: list[str] = field(default_factory=lambda: ["source:cc-cedict"])
+    tags: list[str] = field(default_factory=list)
     frequency_rank: int | None = None
     hanzi_frequency: int | None = None
     has_hanzi_frequency: bool = False
 
-    def add_entry(self, traditional: str, pinyin: str, definitions: list[str]) -> None:
-        if traditional not in self.traditional_variants:
-            self.traditional_variants.append(traditional)
+    def __post_init__(self) -> None:
+        self.tags = normalized_tags(self.tags)
 
+    def add_entry(self, pinyin: str, definitions: list[str]) -> None:
         form = self.forms.get(pinyin)
         if form is None:
             form = LexiconForm(pinyin=pinyin)
             self.forms[pinyin] = form
 
-        form.add_traditional_variant(traditional)
         form.append_definitions(definitions)
 
     def add_form(self, form: LexiconForm) -> None:
@@ -243,7 +243,7 @@ class LexiconWord:
 
     def add_tags(self, tags: list[str]) -> None:
         seen = set(self.tags)
-        for tag in tags:
+        for tag in normalized_tags(tags):
             if tag in seen:
                 continue
             self.tags.append(tag)
@@ -276,7 +276,6 @@ class LexiconWord:
             "forms": [form.to_json() for form in forms],
             "simplified": self.simplified,
             "tags": list(self.tags),
-            "traditional_variants": list(self.traditional_variants),
         }
         if include_enrichment and self.frequency_rank is not None:
             data["frequency"] = {"rank": self.frequency_rank}
@@ -294,7 +293,6 @@ class LexiconWord:
     def from_master_json(cls, data: dict[str, Any]) -> "LexiconWord":
         word = cls(
             simplified=str(data.get("simplified") or ""),
-            traditional_variants=[str(value) for value in data.get("traditional_variants", [])],
             tags=[str(value) for value in data.get("tags", [])],
             frequency_rank=(
                 int(data["frequency"]["rank"])
@@ -318,7 +316,7 @@ class LexiconState:
     source: LexiconSource
     words: dict[str, LexiconWord]
     parse_summary: ParseSummary
-    schema: str = "hanzi-master-lexicon-cc-cedict-v2"
+    schema: str = "hanzi-master-lexicon-cc-cedict-v3"
     hanzi_dropped_duplicates: list[dict[str, Any]] = field(default_factory=list)
 
     def sorted_words(self) -> list[LexiconWord]:
@@ -387,7 +385,7 @@ class LexiconState:
             for word in (LexiconWord.from_master_json(word_data) for word_data in data.get("words", []))
         }
         return cls(
-            schema=str(data.get("schema") or "hanzi-master-lexicon-cc-cedict-v2"),
+            schema=str(data.get("schema") or "hanzi-master-lexicon-cc-cedict-v3"),
             source=LexiconSource.from_master_json(data.get("source", {})),
             parse_summary=ParseSummary.from_master_json(data.get("summary", {})),
             words=words,

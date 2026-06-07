@@ -22,6 +22,10 @@ from anki_hanzi.enrichment.xiehanzi_consumption import bucket_source_form_ids, p
 
 
 RuleHandler = Callable[..., dict[str, Any]]
+PairId = tuple[int, int]
+PairContext = dict[str, Any]
+PairContextPredicate = Callable[[dict[str, Any]], PairContext | None]
+PairPredicate = Callable[[dict[str, Any]], bool]
 
 PINYIN_NUMBERED_TOKEN_RE = re.compile(r"[A-Za-züÜv:]+[1-5]?")
 ALSO_PR_RE = re.compile(r"also\s+pr\.\s*\[([^\]]+)\]", re.IGNORECASE)
@@ -67,16 +71,10 @@ class TargetFormRef:
     form: LexiconForm
 
 
-def form_pinyin_reading_string(form: LexiconForm) -> str:
-    return " / ".join(form.pinyin_readings or [form.pinyin])
-
-
 def source_entry_report(entry: dict[str, Any]) -> dict[str, Any]:
     report = {
         "simplified": entry["simplified"],
-        "traditional": entry["traditional"],
         "pinyin": entry["pinyin"],
-        "zhuyin": entry["zhuyin"],
         "deck_level": entry["deck_level"],
         "raw_level": entry["raw_level"],
         "source": entry["source"],
@@ -90,7 +88,7 @@ def source_entry_report(entry: dict[str, Any]) -> dict[str, Any]:
 def candidate_report(entry: dict[str, Any], target: TargetFormRef) -> dict[str, Any]:
     word = target.word
     form = target.form
-    dictionary_pinyin = form_pinyin_reading_string(form)
+    dictionary_pinyin = form.pinyin_reading_string
     source_definitions = definitions_from_meaning_html(entry["meaning_html"])
     return {
         "target": {
@@ -102,7 +100,6 @@ def candidate_report(entry: dict[str, Any], target: TargetFormRef) -> dict[str, 
             "pinyin": dictionary_pinyin,
             "primary_pinyin": form.pinyin,
             "pinyin_readings": list(form.pinyin_readings),
-            "traditional_variants": list(form.traditional_variants),
             "tags": list(form.tags),
             "definitions": list(form.definitions),
         },
@@ -207,12 +204,99 @@ def matching_pair_identity(item: dict[str, Any]) -> tuple[int, int] | None:
     return (pair_source_form_id(item), int(item["context"]["candidate_index_for_source"]))
 
 
+def group_pairs_by_source_form(working_pairs: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]:
+    pairs_by_source_form: dict[int, list[dict[str, Any]]] = {}
+    for pair in working_pairs:
+        pairs_by_source_form.setdefault(pair_source_form_id(pair), []).append(pair)
+    return pairs_by_source_form
+
+
 def matching_pair_for_bucket(item: dict[str, Any], *, bucket: str, matching_rule: str) -> dict[str, Any]:
     return {
         **item,
         "bucket": bucket,
         "matching_rule": matching_rule,
     }
+
+
+def matching_result(
+    selected_items: list[dict[str, Any]],
+    remaining_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "selected_items": selected_items,
+        "remaining_items": remaining_items,
+        "selected_source_form_ids": bucket_source_form_ids(selected_items),
+    }
+
+
+def split_pairs_by_selected_ids(
+    working_pairs: list[dict[str, Any]],
+    selected_pair_ids: set[PairId],
+    *,
+    bucket: str,
+    matching_rule: str,
+    context_by_pair_id: dict[PairId, PairContext] | None = None,
+    context_name: str | None = None,
+) -> dict[str, Any]:
+    selected_items: list[dict[str, Any]] = []
+    remaining_items: list[dict[str, Any]] = []
+
+    for pair in working_pairs:
+        pair_id = matching_pair_identity(pair)
+        if pair_id in selected_pair_ids:
+            selected_pair = matching_pair_for_bucket(pair, bucket=bucket, matching_rule=matching_rule)
+            if context_by_pair_id is not None and context_name is not None:
+                selected_pair["context"] = {
+                    **selected_pair["context"],
+                    context_name: context_by_pair_id[pair_id],
+                }
+            selected_items.append(selected_pair)
+        else:
+            remaining_items.append(pair)
+
+    return matching_result(selected_items, remaining_items)
+
+
+def select_unique_pair_ids_by_source(
+    working_pairs: list[dict[str, Any]],
+    predicate: PairPredicate,
+) -> set[PairId]:
+    selected_pair_ids: set[PairId] = set()
+
+    for source_pairs in group_pairs_by_source_form(working_pairs).values():
+        matching_pairs = [pair for pair in source_pairs if predicate(pair)]
+        if len(matching_pairs) != 1:
+            continue
+        pair_id = matching_pair_identity(matching_pairs[0])
+        if pair_id is not None:
+            selected_pair_ids.add(pair_id)
+
+    return selected_pair_ids
+
+
+def select_unique_pair_contexts_by_source(
+    working_pairs: list[dict[str, Any]],
+    context_for_pair: PairContextPredicate,
+) -> dict[PairId, PairContext]:
+    context_by_pair_id: dict[PairId, PairContext] = {}
+
+    for source_pairs in group_pairs_by_source_form(working_pairs).values():
+        matching_pairs: list[tuple[dict[str, Any], PairContext]] = []
+        for pair in source_pairs:
+            context = context_for_pair(pair)
+            if context is not None:
+                matching_pairs.append((pair, context))
+
+        if len(matching_pairs) != 1:
+            continue
+
+        pair, context = matching_pairs[0]
+        pair_id = matching_pair_identity(pair)
+        if pair_id is not None:
+            context_by_pair_id[pair_id] = context
+
+    return context_by_pair_id
 
 
 def manual_pinyin_override_for_source(source: dict[str, Any]) -> dict[str, str] | None:
@@ -224,21 +308,6 @@ def manual_pinyin_override_for_source(source: dict[str, Any]) -> dict[str, str] 
         "override_pinyin": override["pinyin"],
         "reason": override["reason"],
     }
-
-
-def matching_pair_with_manual_pinyin_override(
-    item: dict[str, Any],
-    override: dict[str, str],
-    *,
-    bucket: str,
-    matching_rule: str,
-) -> dict[str, Any]:
-    pair = matching_pair_for_bucket(item, bucket=bucket, matching_rule=matching_rule)
-    pair["context"] = {
-        **pair["context"],
-        "manual_pinyin_override": override,
-    }
-    return pair
 
 
 def numbered_pinyin_tokens(value: str) -> list[tuple[str, str]]:
@@ -286,23 +355,6 @@ def spoken_tone_variant_kinds(source_pinyin: str, dictionary_pinyin: str) -> tup
             return ()
 
     return tuple(sorted(kinds))
-
-
-def matching_pair_with_spoken_tone_variant(
-    item: dict[str, Any],
-    kinds: tuple[str, ...],
-    *,
-    bucket: str,
-    matching_rule: str,
-) -> dict[str, Any]:
-    pair = matching_pair_for_bucket(item, bucket=bucket, matching_rule=matching_rule)
-    pair["context"] = {
-        **pair["context"],
-        "spoken_tone_variant": {
-            "kinds": list(kinds),
-        },
-    }
-    return pair
 
 
 def unique_pinyin_reading_records(value: str) -> list[dict[str, str]]:
@@ -367,21 +419,6 @@ def exact_definition_also_pr_context(pair: dict[str, Any]) -> dict[str, Any] | N
     return also_pr_pinyin_context(pair)
 
 
-def matching_pair_with_exact_definition_also_pr(
-    item: dict[str, Any],
-    also_pr_context: dict[str, Any],
-    *,
-    bucket: str,
-    matching_rule: str,
-) -> dict[str, Any]:
-    pair = matching_pair_for_bucket(item, bucket=bucket, matching_rule=matching_rule)
-    pair["context"] = {
-        **pair["context"],
-        "exact_definition_also_pr": also_pr_context,
-    }
-    return pair
-
-
 def split_semicolon_definitions(definitions: list[str]) -> list[str]:
     split_definitions: list[str] = []
     seen: set[str] = set()
@@ -422,21 +459,6 @@ def semicolon_split_exact_definition_also_pr_context(pair: dict[str, Any]) -> di
         "source_expanded_definitions": split_semicolon_definitions(source_definitions),
         "dictionary_expanded_definitions": split_semicolon_definitions(dictionary_definitions),
     }
-
-
-def matching_pair_with_semicolon_split_exact_definition_also_pr(
-    item: dict[str, Any],
-    context: dict[str, Any],
-    *,
-    bucket: str,
-    matching_rule: str,
-) -> dict[str, Any]:
-    pair = matching_pair_for_bucket(item, bucket=bucket, matching_rule=matching_rule)
-    pair["context"] = {
-        **pair["context"],
-        "semicolon_split_exact_definition_also_pr": context,
-    }
-    return pair
 
 
 def source_html_subentries(meaning_html: str) -> list[dict[str, Any]]:
@@ -520,21 +542,6 @@ def html_subform_match_context(source_pairs: list[dict[str, Any]]) -> dict[str, 
     }
 
 
-def matching_pair_with_html_subform_definition_cover(
-    item: dict[str, Any],
-    context: dict[str, Any],
-    *,
-    bucket: str,
-    matching_rule: str,
-) -> dict[str, Any]:
-    pair = matching_pair_for_bucket(item, bucket=bucket, matching_rule=matching_rule)
-    pair["context"] = {
-        **pair["context"],
-        "html_subform_definition_cover": context,
-    }
-    return pair
-
-
 def pair_pinyin_kind(pair: dict[str, Any]) -> str:
     return classify_pinyin(pair["source"]["pinyin"], pair["dictionary"]["pinyin"])
 
@@ -607,14 +614,9 @@ def match_manual_pinyin_override_pairs(
     bucket: str,
     matching_rule: str,
 ) -> dict[str, Any]:
-    pairs_by_source_form: dict[int, list[dict[str, Any]]] = {}
-    for pair in working_pairs:
-        pairs_by_source_form.setdefault(pair_source_form_id(pair), []).append(pair)
+    overrides_by_pair_id: dict[PairId, dict[str, str]] = {}
 
-    selected_pair_ids: set[tuple[int, int]] = set()
-    overrides_by_pair_id: dict[tuple[int, int], dict[str, str]] = {}
-
-    for source_pairs in pairs_by_source_form.values():
+    for source_pairs in group_pairs_by_source_form(working_pairs).values():
         override = manual_pinyin_override_for_source(source_pairs[0]["source"])
         if override is None:
             continue
@@ -629,30 +631,16 @@ def match_manual_pinyin_override_pairs(
 
         pair_id = matching_pair_identity(corrected_matching_pairs[0])
         if pair_id is not None:
-            selected_pair_ids.add(pair_id)
             overrides_by_pair_id[pair_id] = override
 
-    selected_items: list[dict[str, Any]] = []
-    remaining_items: list[dict[str, Any]] = []
-    for pair in working_pairs:
-        pair_id = matching_pair_identity(pair)
-        if pair_id in selected_pair_ids:
-            selected_items.append(
-                matching_pair_with_manual_pinyin_override(
-                    pair,
-                    overrides_by_pair_id[pair_id],
-                    bucket=bucket,
-                    matching_rule=matching_rule,
-                )
-            )
-        else:
-            remaining_items.append(pair)
-
-    return {
-        "selected_items": selected_items,
-        "remaining_items": remaining_items,
-        "selected_source_form_ids": bucket_source_form_ids(selected_items),
-    }
+    return split_pairs_by_selected_ids(
+        working_pairs,
+        set(overrides_by_pair_id),
+        bucket=bucket,
+        matching_rule=matching_rule,
+        context_by_pair_id=overrides_by_pair_id,
+        context_name="manual_pinyin_override",
+    )
 
 
 def match_strict_pinyin_exact_unique_pairs(
@@ -686,51 +674,23 @@ def match_spoken_tone_variant_pairs(
     bucket: str,
     matching_rule: str,
 ) -> dict[str, Any]:
-    pairs_by_source_form: dict[int, list[dict[str, Any]]] = {}
-    for pair in working_pairs:
-        pairs_by_source_form.setdefault(pair_source_form_id(pair), []).append(pair)
+    def context_for_pair(pair: dict[str, Any]) -> PairContext | None:
+        if pair_pinyin_kind(pair) != "toneless":
+            return None
+        kinds = spoken_tone_variant_kinds(pair["source"]["pinyin"], pair["dictionary"]["pinyin"])
+        if not kinds:
+            return None
+        return {"kinds": list(kinds)}
 
-    selected_pair_ids: set[tuple[int, int]] = set()
-    kinds_by_pair_id: dict[tuple[int, int], tuple[str, ...]] = {}
-    for source_pairs in pairs_by_source_form.values():
-        matching_pairs: list[tuple[dict[str, Any], tuple[str, ...]]] = []
-        for pair in source_pairs:
-            if pair_pinyin_kind(pair) != "toneless":
-                continue
-            kinds = spoken_tone_variant_kinds(pair["source"]["pinyin"], pair["dictionary"]["pinyin"])
-            if kinds:
-                matching_pairs.append((pair, kinds))
-
-        if len(matching_pairs) != 1:
-            continue
-
-        pair, kinds = matching_pairs[0]
-        pair_id = matching_pair_identity(pair)
-        if pair_id is not None:
-            selected_pair_ids.add(pair_id)
-            kinds_by_pair_id[pair_id] = kinds
-
-    selected_items: list[dict[str, Any]] = []
-    remaining_items: list[dict[str, Any]] = []
-    for pair in working_pairs:
-        pair_id = matching_pair_identity(pair)
-        if pair_id in selected_pair_ids:
-            selected_items.append(
-                matching_pair_with_spoken_tone_variant(
-                    pair,
-                    kinds_by_pair_id[pair_id],
-                    bucket=bucket,
-                    matching_rule=matching_rule,
-                )
-            )
-        else:
-            remaining_items.append(pair)
-
-    return {
-        "selected_items": selected_items,
-        "remaining_items": remaining_items,
-        "selected_source_form_ids": bucket_source_form_ids(selected_items),
-    }
+    context_by_pair_id = select_unique_pair_contexts_by_source(working_pairs, context_for_pair)
+    return split_pairs_by_selected_ids(
+        working_pairs,
+        set(context_by_pair_id),
+        bucket=bucket,
+        matching_rule=matching_rule,
+        context_by_pair_id=context_by_pair_id,
+        context_name="spoken_tone_variant",
+    )
 
 
 def match_case_variant_exact_definition_pairs(
@@ -738,37 +698,16 @@ def match_case_variant_exact_definition_pairs(
     bucket: str,
     matching_rule: str,
 ) -> dict[str, Any]:
-    pairs_by_source_form: dict[int, list[dict[str, Any]]] = {}
-    for pair in working_pairs:
-        pairs_by_source_form.setdefault(pair_source_form_id(pair), []).append(pair)
-
-    selected_pair_ids: set[tuple[int, int]] = set()
-    for source_pairs in pairs_by_source_form.values():
-        matching_pairs = [
-            pair
-            for pair in source_pairs
-            if pair_pinyin_kind(pair) == "case_variant" and pair_definition_sets_exact(pair)
-        ]
-        if len(matching_pairs) != 1:
-            continue
-        pair_id = matching_pair_identity(matching_pairs[0])
-        if pair_id is not None:
-            selected_pair_ids.add(pair_id)
-
-    selected_items: list[dict[str, Any]] = []
-    remaining_items: list[dict[str, Any]] = []
-    for pair in working_pairs:
-        pair_id = matching_pair_identity(pair)
-        if pair_id in selected_pair_ids:
-            selected_items.append(matching_pair_for_bucket(pair, bucket=bucket, matching_rule=matching_rule))
-        else:
-            remaining_items.append(pair)
-
-    return {
-        "selected_items": selected_items,
-        "remaining_items": remaining_items,
-        "selected_source_form_ids": bucket_source_form_ids(selected_items),
-    }
+    selected_pair_ids = select_unique_pair_ids_by_source(
+        working_pairs,
+        lambda pair: pair_pinyin_kind(pair) == "case_variant" and pair_definition_sets_exact(pair),
+    )
+    return split_pairs_by_selected_ids(
+        working_pairs,
+        selected_pair_ids,
+        bucket=bucket,
+        matching_rule=matching_rule,
+    )
 
 
 def match_exact_definition_also_pr_pairs(
@@ -776,49 +715,15 @@ def match_exact_definition_also_pr_pairs(
     bucket: str,
     matching_rule: str,
 ) -> dict[str, Any]:
-    pairs_by_source_form: dict[int, list[dict[str, Any]]] = {}
-    for pair in working_pairs:
-        pairs_by_source_form.setdefault(pair_source_form_id(pair), []).append(pair)
-
-    selected_pair_ids: set[tuple[int, int]] = set()
-    context_by_pair_id: dict[tuple[int, int], dict[str, Any]] = {}
-    for source_pairs in pairs_by_source_form.values():
-        matching_pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
-        for pair in source_pairs:
-            also_pr_context = exact_definition_also_pr_context(pair)
-            if also_pr_context is not None:
-                matching_pairs.append((pair, also_pr_context))
-
-        if len(matching_pairs) != 1:
-            continue
-
-        pair, also_pr_context = matching_pairs[0]
-        pair_id = matching_pair_identity(pair)
-        if pair_id is not None:
-            selected_pair_ids.add(pair_id)
-            context_by_pair_id[pair_id] = also_pr_context
-
-    selected_items: list[dict[str, Any]] = []
-    remaining_items: list[dict[str, Any]] = []
-    for pair in working_pairs:
-        pair_id = matching_pair_identity(pair)
-        if pair_id in selected_pair_ids:
-            selected_items.append(
-                matching_pair_with_exact_definition_also_pr(
-                    pair,
-                    context_by_pair_id[pair_id],
-                    bucket=bucket,
-                    matching_rule=matching_rule,
-                )
-            )
-        else:
-            remaining_items.append(pair)
-
-    return {
-        "selected_items": selected_items,
-        "remaining_items": remaining_items,
-        "selected_source_form_ids": bucket_source_form_ids(selected_items),
-    }
+    context_by_pair_id = select_unique_pair_contexts_by_source(working_pairs, exact_definition_also_pr_context)
+    return split_pairs_by_selected_ids(
+        working_pairs,
+        set(context_by_pair_id),
+        bucket=bucket,
+        matching_rule=matching_rule,
+        context_by_pair_id=context_by_pair_id,
+        context_name="exact_definition_also_pr",
+    )
 
 
 def match_exact_definition_pairs(
@@ -826,33 +731,13 @@ def match_exact_definition_pairs(
     bucket: str,
     matching_rule: str,
 ) -> dict[str, Any]:
-    pairs_by_source_form: dict[int, list[dict[str, Any]]] = {}
-    for pair in working_pairs:
-        pairs_by_source_form.setdefault(pair_source_form_id(pair), []).append(pair)
-
-    selected_pair_ids: set[tuple[int, int]] = set()
-    for source_pairs in pairs_by_source_form.values():
-        matching_pairs = [pair for pair in source_pairs if pair_definition_sets_exact(pair)]
-        if len(matching_pairs) != 1:
-            continue
-        pair_id = matching_pair_identity(matching_pairs[0])
-        if pair_id is not None:
-            selected_pair_ids.add(pair_id)
-
-    selected_items: list[dict[str, Any]] = []
-    remaining_items: list[dict[str, Any]] = []
-    for pair in working_pairs:
-        pair_id = matching_pair_identity(pair)
-        if pair_id in selected_pair_ids:
-            selected_items.append(matching_pair_for_bucket(pair, bucket=bucket, matching_rule=matching_rule))
-        else:
-            remaining_items.append(pair)
-
-    return {
-        "selected_items": selected_items,
-        "remaining_items": remaining_items,
-        "selected_source_form_ids": bucket_source_form_ids(selected_items),
-    }
+    selected_pair_ids = select_unique_pair_ids_by_source(working_pairs, pair_definition_sets_exact)
+    return split_pairs_by_selected_ids(
+        working_pairs,
+        selected_pair_ids,
+        bucket=bucket,
+        matching_rule=matching_rule,
+    )
 
 
 def match_semicolon_split_exact_definition_also_pr_pairs(
@@ -860,49 +745,18 @@ def match_semicolon_split_exact_definition_also_pr_pairs(
     bucket: str,
     matching_rule: str,
 ) -> dict[str, Any]:
-    pairs_by_source_form: dict[int, list[dict[str, Any]]] = {}
-    for pair in working_pairs:
-        pairs_by_source_form.setdefault(pair_source_form_id(pair), []).append(pair)
-
-    selected_pair_ids: set[tuple[int, int]] = set()
-    context_by_pair_id: dict[tuple[int, int], dict[str, Any]] = {}
-    for source_pairs in pairs_by_source_form.values():
-        matching_pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
-        for pair in source_pairs:
-            context = semicolon_split_exact_definition_also_pr_context(pair)
-            if context is not None:
-                matching_pairs.append((pair, context))
-
-        if len(matching_pairs) != 1:
-            continue
-
-        pair, context = matching_pairs[0]
-        pair_id = matching_pair_identity(pair)
-        if pair_id is not None:
-            selected_pair_ids.add(pair_id)
-            context_by_pair_id[pair_id] = context
-
-    selected_items: list[dict[str, Any]] = []
-    remaining_items: list[dict[str, Any]] = []
-    for pair in working_pairs:
-        pair_id = matching_pair_identity(pair)
-        if pair_id in selected_pair_ids:
-            selected_items.append(
-                matching_pair_with_semicolon_split_exact_definition_also_pr(
-                    pair,
-                    context_by_pair_id[pair_id],
-                    bucket=bucket,
-                    matching_rule=matching_rule,
-                )
-            )
-        else:
-            remaining_items.append(pair)
-
-    return {
-        "selected_items": selected_items,
-        "remaining_items": remaining_items,
-        "selected_source_form_ids": bucket_source_form_ids(selected_items),
-    }
+    context_by_pair_id = select_unique_pair_contexts_by_source(
+        working_pairs,
+        semicolon_split_exact_definition_also_pr_context,
+    )
+    return split_pairs_by_selected_ids(
+        working_pairs,
+        set(context_by_pair_id),
+        bucket=bucket,
+        matching_rule=matching_rule,
+        context_by_pair_id=context_by_pair_id,
+        context_name="semicolon_split_exact_definition_also_pr",
+    )
 
 
 def match_html_subform_definition_cover_pairs(
@@ -910,13 +764,8 @@ def match_html_subform_definition_cover_pairs(
     bucket: str,
     matching_rule: str,
 ) -> dict[str, Any]:
-    pairs_by_source_form: dict[int, list[dict[str, Any]]] = {}
-    for pair in working_pairs:
-        pairs_by_source_form.setdefault(pair_source_form_id(pair), []).append(pair)
-
-    selected_pair_ids: set[tuple[int, int]] = set()
-    context_by_pair_id: dict[tuple[int, int], dict[str, Any]] = {}
-    for source_pairs in pairs_by_source_form.values():
+    context_by_pair_id: dict[PairId, PairContext] = {}
+    for source_pairs in group_pairs_by_source_form(working_pairs).values():
         context = html_subform_match_context(source_pairs)
         if context is None:
             continue
@@ -925,30 +774,16 @@ def match_html_subform_definition_cover_pairs(
             pair_id = matching_pair_identity(pair)
             if pair_id is None:
                 continue
-            selected_pair_ids.add(pair_id)
             context_by_pair_id[pair_id] = context
 
-    selected_items: list[dict[str, Any]] = []
-    remaining_items: list[dict[str, Any]] = []
-    for pair in working_pairs:
-        pair_id = matching_pair_identity(pair)
-        if pair_id in selected_pair_ids:
-            selected_items.append(
-                matching_pair_with_html_subform_definition_cover(
-                    pair,
-                    context_by_pair_id[pair_id],
-                    bucket=bucket,
-                    matching_rule=matching_rule,
-                )
-            )
-        else:
-            remaining_items.append(pair)
-
-    return {
-        "selected_items": selected_items,
-        "remaining_items": remaining_items,
-        "selected_source_form_ids": bucket_source_form_ids(selected_items),
-    }
+    return split_pairs_by_selected_ids(
+        working_pairs,
+        set(context_by_pair_id),
+        bucket=bucket,
+        matching_rule=matching_rule,
+        context_by_pair_id=context_by_pair_id,
+        context_name="html_subform_definition_cover",
+    )
 
 
 def match_unique_pinyin_kind_pairs(
@@ -958,32 +793,16 @@ def match_unique_pinyin_kind_pairs(
     matching_rule: str,
     pinyin_kind: str,
 ) -> dict[str, Any]:
-    pairs_by_source_form: dict[int, list[dict[str, Any]]] = {}
-    for pair in working_pairs:
-        pairs_by_source_form.setdefault(pair_source_form_id(pair), []).append(pair)
-
-    selected_pair_ids: set[tuple[int, int]] = set()
-    for source_pairs in pairs_by_source_form.values():
-        matching_pairs = [pair for pair in source_pairs if pair_pinyin_kind(pair) == pinyin_kind]
-        if len(matching_pairs) == 1:
-            pair_id = matching_pair_identity(matching_pairs[0])
-            if pair_id is not None:
-                selected_pair_ids.add(pair_id)
-
-    selected_items: list[dict[str, Any]] = []
-    remaining_items: list[dict[str, Any]] = []
-    for pair in working_pairs:
-        pair_id = matching_pair_identity(pair)
-        if pair_id in selected_pair_ids:
-            selected_items.append(matching_pair_for_bucket(pair, bucket=bucket, matching_rule=matching_rule))
-        else:
-            remaining_items.append(pair)
-
-    return {
-        "selected_items": selected_items,
-        "remaining_items": remaining_items,
-        "selected_source_form_ids": bucket_source_form_ids(selected_items),
-    }
+    selected_pair_ids = select_unique_pair_ids_by_source(
+        working_pairs,
+        lambda pair: pair_pinyin_kind(pair) == pinyin_kind,
+    )
+    return split_pairs_by_selected_ids(
+        working_pairs,
+        selected_pair_ids,
+        bucket=bucket,
+        matching_rule=matching_rule,
+    )
 
 
 def match_default_unresolved_pairs(
@@ -1011,9 +830,9 @@ MATCHING_RULES = {
         scope="pair_pipeline",
         requires=(
             "The working set already contains only exact Simplified-compatible pairs",
-            "Exactly one remaining pair for the source form has complete strict Pinyin-list equality",
+            "Exactly one remaining pair for the source form has complete strict numbered preserve-case Pinyin-list equality",
         ),
-        selected_pair="the unique complete strict Pinyin-list exact pair",
+        selected_pair="the unique complete strict numbered preserve-case Pinyin-list exact pair",
         handler=match_strict_pinyin_exact_unique_pairs,
     ),
     "manual_pinyin_override_unique": MatchingRuleDefinition(
@@ -1021,7 +840,8 @@ MATCHING_RULES = {
         scope="pair_pipeline",
         requires=(
             "The source form has a configured manual Pinyin correction",
-            "Exactly one remaining pair matches the corrected Pinyin with complete strict or compact preserve-case Pinyin-list equality",
+            "Exactly one remaining pair matches the corrected Pinyin with complete strict numbered preserve-case "
+            "or compact preserve-case Pinyin-list equality",
         ),
         selected_pair="the unique pair targeted by the configured corrected Pinyin value",
         handler=match_manual_pinyin_override_pairs,
@@ -1032,7 +852,7 @@ MATCHING_RULES = {
         requires=(
             "The working set already contains only exact Simplified-compatible pairs",
             "Exactly one remaining pair for the source form has complete compact preserve-case Pinyin-list equality",
-            "The strict Pinyin reading lists differ only by spacing or accent/number formatting",
+            "The strict numbered preserve-case Pinyin reading lists differ only by spacing or separator formatting",
         ),
         selected_pair="the unique complete compact preserve-case Pinyin-list format-variant pair",
         handler=match_format_variant_unique_pairs,
@@ -1055,7 +875,7 @@ MATCHING_RULES = {
         requires=(
             "The working set already contains only exact Simplified-compatible pairs",
             "Exactly one remaining pair for the source form has complete compact lower-case Pinyin-list equality",
-            "The strict Pinyin reading lists differ only by case after spacing and accent/number normalization",
+            "The strict numbered preserve-case Pinyin reading lists differ by case after spacing and separator normalization",
             "The complete non-empty normalized source and dictionary definition sets are identical",
         ),
         selected_pair="the unique exact-definition case-variant pair",
@@ -1092,7 +912,7 @@ MATCHING_RULES = {
         requires=(
             "The working set already contains only exact Simplified-compatible pairs",
             "No higher-priority pair-pipeline step consumed this source form",
-            "Exactly one remaining pair for the source form has complete definition-set equality after "
+            "Exactly one remaining pair for the source form has complete normalized definition-set equality after "
             "rule-local semicolon splitting",
             "Every source Pinyin reading is either already on the dictionary form or explicitly listed in the "
             "dictionary definitions as also pr.",
@@ -1110,8 +930,8 @@ MATCHING_RULES = {
         requires=(
             "No higher-priority pair-pipeline step consumed this source form",
             "The xiehanzi HTML contains one or more Pinyin/definition subentries",
-            "Each HTML subentry has exactly one strict-Pinyin dictionary candidate whose definition set matches "
-            "after rule-local semicolon splitting",
+            "Each HTML subentry has exactly one strict numbered preserve-case Pinyin dictionary candidate whose "
+            "normalized definition set matches after rule-local semicolon splitting",
             "The matched subentries cover every remaining dictionary candidate for the source form exactly once",
         ),
         selected_pair="all pairs in the source form whose dictionary forms are covered by xiehanzi HTML subentries",

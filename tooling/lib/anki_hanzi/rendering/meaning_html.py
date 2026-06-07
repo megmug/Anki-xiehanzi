@@ -97,14 +97,10 @@ def rendered_definitions(form: LexiconForm) -> list[str]:
     return definitions
 
 
-def form_pinyin_reading_string(form: LexiconForm) -> str:
-    return " / ".join(form.pinyin_readings or [form.pinyin])
-
-
 def render_meaning_form(word: LexiconWord, form: LexiconForm) -> str:
     simplified = word.simplified
     primary_pinyin = form.pinyin
-    pinyin = form_pinyin_reading_string(form)
+    pinyin = form.pinyin_reading_string
 
     output = [
         '<div class="char">  ',
