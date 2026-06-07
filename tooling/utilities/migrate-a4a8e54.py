@@ -261,14 +261,46 @@ def fields_by_name(field_names, flds):
     }
 
 
-def card_is_touched(card, revlog_count):
+def card_touch_state_class(card, revlog_count):
     data = (card.get("data") or "").strip()
-    return (
-        int(card.get("reps") or 0) > 0
-        or int(card.get("lapses") or 0) > 0
-        or revlog_count > 0
-        or data not in ("", "{}")
-    )
+    has_reps_or_lapses = int(card.get("reps") or 0) > 0 or int(card.get("lapses") or 0) > 0
+    has_revlog = int(revlog_count or 0) > 0
+    has_card_data = data not in ("", "{}")
+    is_new_suspended = int(card.get("type") or 0) == 0 and int(card.get("queue") or 0) == -1
+
+    if is_new_suspended and not has_reps_or_lapses and not has_card_data and has_revlog:
+        return "revlog_only_new_suspended"
+    if has_reps_or_lapses or has_card_data:
+        return "scheduler_state"
+    if has_revlog:
+        return "revlog_only"
+    return "untouched"
+
+
+def card_is_touched(card, revlog_count):
+    return card_touch_state_class(card, revlog_count) not in {
+        "untouched",
+        "revlog_only_new_suspended",
+    }
+
+
+def touch_reasons(record):
+    card = record.get("card", {})
+    data = (card.get("data") or "").strip()
+    reasons = []
+    if int(card.get("reps") or 0) > 0:
+        reasons.append("reps")
+    if int(card.get("lapses") or 0) > 0:
+        reasons.append("lapses")
+    if int(record.get("revlog_count") or 0) > 0:
+        reasons.append("revlog")
+    if data not in ("", "{}"):
+        reasons.append("card_data")
+    return reasons
+
+
+def touch_state_class(record):
+    return card_touch_state_class(record.get("card", {}), record.get("revlog_count"))
 
 
 def normalized_note_pinyin(value):
@@ -327,6 +359,9 @@ def card_summary(record):
         "reps": card.get("reps"),
         "lapses": card.get("lapses"),
         "revlog_count": record.get("revlog_count"),
+        "touch_reasons": touch_reasons(record),
+        "touch_state_class": touch_state_class(record),
+        "card_data": card.get("data"),
         "touched": record.get("touched"),
         "suspended": record.get("suspended"),
     }
@@ -883,6 +918,21 @@ def summarize_build_id_counts(records):
     )
 
 
+def summarize_touch_state_classes(records):
+    return dict(sorted(Counter(touch_state_class(record) for record in records).items()))
+
+
+def summarize_touch_reason_sets(records):
+    return dict(
+        sorted(
+            Counter(
+                "+".join(touch_reasons(record)) or "none"
+                for record in records
+            ).items()
+        )
+    )
+
+
 def validate_preflight(source_info, target_preview_info, preset_id):
     source_records = source_info["records"]
     target_preview_records = target_preview_info["records"]
@@ -977,6 +1027,7 @@ def validate_preflight(source_info, target_preview_info, preset_id):
         "match_plan": match_plan,
         "unmatched_source": unmatched_source,
         "touched_unmatched": touched_unmatched,
+        "disallowed_touched_unmatched": disallowed_touched_unmatched,
         "resolved_source_duplicates": resolved_source_duplicates,
         "unresolved_source_duplicates": unresolved_source_duplicates,
         "target_preset_id": preset_id,
@@ -1009,8 +1060,26 @@ try:
     old_card_ids = [record["card"]["id"] for record in source_records]
 
     if preflight["problems"]:
+        touched_unmatched_records = preflight["touched_unmatched"]
+        disallowed_touched_unmatched_records = preflight["disallowed_touched_unmatched"]
         preflight_report = {
             "problems": preflight["problems"],
+            "touched_unmatched_count": len(touched_unmatched_records),
+            "touched_unmatched_state_classes": summarize_touch_state_classes(touched_unmatched_records),
+            "touched_unmatched_touch_reasons": summarize_touch_reason_sets(touched_unmatched_records),
+            "touched_unmatched": [
+                card_summary(record) for record in touched_unmatched_records
+            ],
+            "disallowed_touched_unmatched_count": len(disallowed_touched_unmatched_records),
+            "disallowed_touched_unmatched_state_classes": summarize_touch_state_classes(
+                disallowed_touched_unmatched_records
+            ),
+            "disallowed_touched_unmatched_touch_reasons": summarize_touch_reason_sets(
+                disallowed_touched_unmatched_records
+            ),
+            "disallowed_touched_unmatched": [
+                card_summary(record) for record in disallowed_touched_unmatched_records
+            ],
             "resolved_source_duplicate_keys": len(preflight["resolved_source_duplicates"]),
             "unresolved_source_duplicate_keys": len(preflight["unresolved_source_duplicates"]),
             "resolved_source_duplicate_samples": preflight["resolved_source_duplicates"][:20],
@@ -1209,7 +1278,7 @@ try:
     default_only_target_keys = final_match_plan["target_only_keys"]
     skipped_touched_kind_counts = Counter(record.get("kind") for record in touched_unmatched)
     loose_match_samples = []
-    for source_key in sorted(final_match_plan["loose_source_keys"])[:20]:
+    for source_key in sorted(final_match_plan["loose_source_keys"]):
         final_match = final_matches_by_source_key[source_key]
         loose_match_samples.append({
             "source": card_summary(source_by_key[source_key]),
