@@ -12,6 +12,7 @@ from anki_hanzi.lexicon import LexiconForm, LexiconState, LexiconWord
 from anki_hanzi.enrichment.xiehanzi_rule_helpers import (
     definition_sets_exact,
     definitions_from_meaning_html,
+    normalize_matching_definition,
     normalize_pinyin_u_variants,
     pinyin_rule_kind as classify_pinyin,
     pinyin_rule_readings as pinyin_readings,
@@ -23,6 +24,7 @@ RuleHandler = Callable[..., dict[str, Any]]
 
 PINYIN_NUMBERED_TOKEN_RE = re.compile(r"[A-Za-züÜv:]+[1-5]?")
 ALSO_PR_RE = re.compile(r"also\s+pr\.\s*\[([^\]]+)\]", re.IGNORECASE)
+SEMICOLON_SPLIT_RE = re.compile(r"\s*;\s*")
 MANUAL_PINYIN_OVERRIDES = {
     ("标致", "7-9"): {
         "pinyin": "biao1zhi5",
@@ -327,10 +329,7 @@ def also_pr_definition_readings(definitions: list[str]) -> list[dict[str, str]]:
     return readings
 
 
-def exact_definition_also_pr_context(pair: dict[str, Any]) -> dict[str, Any] | None:
-    if not pair_definition_sets_exact(pair):
-        return None
-
+def also_pr_pinyin_context(pair: dict[str, Any]) -> dict[str, Any] | None:
     source_readings = unique_pinyin_reading_records(pair["source"]["pinyin"])
     dictionary_readings = unique_pinyin_reading_records(pair["dictionary"]["pinyin"])
     also_pr_readings = also_pr_definition_readings(list(pair["dictionary"].get("definitions", [])))
@@ -356,6 +355,12 @@ def exact_definition_also_pr_context(pair: dict[str, Any]) -> dict[str, Any] | N
     }
 
 
+def exact_definition_also_pr_context(pair: dict[str, Any]) -> dict[str, Any] | None:
+    if not pair_definition_sets_exact(pair):
+        return None
+    return also_pr_pinyin_context(pair)
+
+
 def matching_pair_with_exact_definition_also_pr(
     item: dict[str, Any],
     also_pr_context: dict[str, Any],
@@ -367,6 +372,63 @@ def matching_pair_with_exact_definition_also_pr(
     pair["context"] = {
         **pair["context"],
         "exact_definition_also_pr": also_pr_context,
+    }
+    return pair
+
+
+def split_semicolon_definitions(definitions: list[str]) -> list[str]:
+    split_definitions: list[str] = []
+    seen: set[str] = set()
+    for definition in definitions:
+        for part in SEMICOLON_SPLIT_RE.split(definition):
+            value = part.strip()
+            if not value or value in seen:
+                continue
+            split_definitions.append(value)
+            seen.add(value)
+    return split_definitions
+
+
+def semicolon_split_definition_set(definitions: list[str]) -> set[str]:
+    values = {normalize_matching_definition(definition) for definition in split_semicolon_definitions(definitions)}
+    values.discard("")
+    return values
+
+
+def semicolon_split_definition_sets_exact(left: list[str], right: list[str]) -> bool:
+    left_set = semicolon_split_definition_set(left)
+    right_set = semicolon_split_definition_set(right)
+    return bool(left_set) and left_set == right_set
+
+
+def semicolon_split_exact_definition_also_pr_context(pair: dict[str, Any]) -> dict[str, Any] | None:
+    source_definitions = list(pair.get("source_definitions", []))
+    dictionary_definitions = list(pair["dictionary"].get("definitions", []))
+    if not semicolon_split_definition_sets_exact(source_definitions, dictionary_definitions):
+        return None
+
+    also_pr_context = also_pr_pinyin_context(pair)
+    if also_pr_context is None:
+        return None
+
+    return {
+        **also_pr_context,
+        "source_expanded_definitions": split_semicolon_definitions(source_definitions),
+        "dictionary_expanded_definitions": split_semicolon_definitions(dictionary_definitions),
+    }
+
+
+def matching_pair_with_semicolon_split_exact_definition_also_pr(
+    item: dict[str, Any],
+    context: dict[str, Any],
+    *,
+    bucket: str,
+    matching_rule: str,
+) -> dict[str, Any]:
+    pair = matching_pair_for_bucket(item, bucket=bucket, matching_rule=matching_rule)
+    pair["context"] = {
+        **pair["context"],
+        "semicolon_split_exact_definition_also_pr": context,
     }
     return pair
 
@@ -691,6 +753,56 @@ def match_exact_definition_pairs(
     }
 
 
+def match_semicolon_split_exact_definition_also_pr_pairs(
+    working_pairs: list[dict[str, Any]],
+    bucket: str,
+    matching_rule: str,
+) -> dict[str, Any]:
+    pairs_by_source_form: dict[int, list[dict[str, Any]]] = {}
+    for pair in working_pairs:
+        pairs_by_source_form.setdefault(pair_source_form_id(pair), []).append(pair)
+
+    selected_pair_ids: set[tuple[int, int]] = set()
+    context_by_pair_id: dict[tuple[int, int], dict[str, Any]] = {}
+    for source_pairs in pairs_by_source_form.values():
+        matching_pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for pair in source_pairs:
+            context = semicolon_split_exact_definition_also_pr_context(pair)
+            if context is not None:
+                matching_pairs.append((pair, context))
+
+        if len(matching_pairs) != 1:
+            continue
+
+        pair, context = matching_pairs[0]
+        pair_id = matching_pair_identity(pair)
+        if pair_id is not None:
+            selected_pair_ids.add(pair_id)
+            context_by_pair_id[pair_id] = context
+
+    selected_items: list[dict[str, Any]] = []
+    remaining_items: list[dict[str, Any]] = []
+    for pair in working_pairs:
+        pair_id = matching_pair_identity(pair)
+        if pair_id in selected_pair_ids:
+            selected_items.append(
+                matching_pair_with_semicolon_split_exact_definition_also_pr(
+                    pair,
+                    context_by_pair_id[pair_id],
+                    bucket=bucket,
+                    matching_rule=matching_rule,
+                )
+            )
+        else:
+            remaining_items.append(pair)
+
+    return {
+        "selected_items": selected_items,
+        "remaining_items": remaining_items,
+        "selected_source_form_ids": bucket_source_form_ids(selected_items),
+    }
+
+
 def match_unique_pinyin_kind_pairs(
     working_pairs: list[dict[str, Any]],
     *,
@@ -825,6 +937,24 @@ MATCHING_RULES = {
         ),
         selected_pair="the unique exact-definition pair",
         handler=match_exact_definition_pairs,
+    ),
+    "semicolon_split_exact_definition_also_pr_unique": MatchingRuleDefinition(
+        name="semicolon_split_exact_definition_also_pr_unique",
+        scope="pair_pipeline",
+        requires=(
+            "The working set already contains only exact Simplified-compatible pairs",
+            "No higher-priority pair-pipeline step consumed this source form",
+            "Exactly one remaining pair for the source form has complete definition-set equality after "
+            "rule-local semicolon splitting",
+            "Every source Pinyin reading is either already on the dictionary form or explicitly listed in the "
+            "dictionary definitions as also pr.",
+            "At least one source Pinyin reading is an extra also-pr reading not already on the dictionary form",
+        ),
+        selected_pair=(
+            "the unique semicolon-split exact-definition pair whose source Pinyin is fully explained by also-pr "
+            "readings"
+        ),
+        handler=match_semicolon_split_exact_definition_also_pr_pairs,
     ),
     "default_unresolved": MatchingRuleDefinition(
         name="default_unresolved",

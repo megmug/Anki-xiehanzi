@@ -449,6 +449,7 @@ def new_form_stats() -> dict[str, Any]:
             "spoken_tone_variant": 0,
             "exact_definition": 0,
             "exact_definition_also_pr": 0,
+            "semicolon_split_exact_definition_also_pr": 0,
             "toneless": 0,
             "created": 0,
         },
@@ -560,6 +561,13 @@ def drop_exact_definition_source_form_pairs(
     return drop_source_form_pairs(selected_items, remaining_items)
 
 
+def drop_semicolon_split_exact_definition_also_pr_source_form_pairs(
+    selected_items: list[dict[str, Any]],
+    remaining_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return drop_source_form_pairs(selected_items, remaining_items)
+
+
 def apply_legacy_enrichment_fallback_pairs(
     selected_items: list[dict[str, Any]],
     remaining_items: list[dict[str, Any]],
@@ -623,6 +631,12 @@ CONSUMPTION_RULES = {
         report_only_effect="remove all remaining matching pairs for the exact-definition source form",
         enrichment_effect="apply tags and metadata directly to the selected dictionary form without changing Pinyin",
         handler=drop_exact_definition_source_form_pairs,
+    ),
+    "drop_semicolon_split_exact_definition_also_pr_source_form_pairs": ConsumptionRuleDefinition(
+        name="drop_semicolon_split_exact_definition_also_pr_source_form_pairs",
+        report_only_effect="remove all remaining matching pairs for the semicolon-split exact-definition also-pr form",
+        enrichment_effect="apply tags and metadata directly and add explicitly attested also-pr readings",
+        handler=drop_semicolon_split_exact_definition_also_pr_source_form_pairs,
     ),
     "apply_legacy_enrichment_fallback": ConsumptionRuleDefinition(
         name="apply_legacy_enrichment_fallback",
@@ -1047,18 +1061,18 @@ def compact_lower_pinyin_key_from_record(record: dict[str, Any]) -> str:
     return str(record.get("compact_lower") or "")
 
 
-def matching_also_pr_reading_values(item: dict[str, Any]) -> list[str]:
-    exact_definition_also_pr = item["context"].get("exact_definition_also_pr")
-    if not exact_definition_also_pr:
-        raise ValueError(f"Exact-definition also-pr bucket lacks also-pr context: {item!r}")
+def matching_also_pr_reading_values(item: dict[str, Any], context_key: str) -> list[str]:
+    context = item["context"].get(context_key)
+    if not context:
+        raise ValueError(f"{context_key} bucket item lacks also-pr context: {item!r}")
 
     extra_keys = {
         compact_lower_pinyin_key_from_record(record)
-        for record in exact_definition_also_pr.get("extra_source_readings", [])
+        for record in context.get("extra_source_readings", [])
     }
     also_pr_by_key = {
         compact_lower_pinyin_key_from_record(record): str(record.get("strict") or "")
-        for record in exact_definition_also_pr.get("also_pr_readings", [])
+        for record in context.get("also_pr_readings", [])
     }
 
     readings: list[str] = []
@@ -1067,7 +1081,7 @@ def matching_also_pr_reading_values(item: dict[str, Any]) -> list[str]:
         if reading and reading not in readings:
             readings.append(reading)
     if not readings:
-        raise ValueError(f"Exact-definition also-pr bucket has no addable extra readings: {item!r}")
+        raise ValueError(f"{context_key} bucket has no addable extra readings: {item!r}")
     return readings
 
 
@@ -1111,7 +1125,7 @@ def consume_exact_definition_also_pr_bucket(
         old_readings = list(form.pinyin_readings)
         requested_readings = [
             pinyin_reading_in_reference_spacing(reading, item["dictionary"]["pinyin"])
-            for reading in matching_also_pr_reading_values(item)
+            for reading in matching_also_pr_reading_values(item, "exact_definition_also_pr")
         ]
         added = form.add_pinyin_readings(" / ".join(requested_readings))
         word.sort_forms_by_pinyin()
@@ -1138,6 +1152,61 @@ def consume_exact_definition_also_pr_bucket(
         "missing_deck_after_pipeline": [],
         "form_stats": form_stats,
         "state_effect": "applied exact-definition tags and metadata and added explicitly attested also-pr readings",
+    }
+
+
+def consume_semicolon_split_exact_definition_also_pr_bucket(
+    state: LexiconState,
+    deck_entries: list[dict[str, Any]],
+    pipeline: dict[str, Any],
+    form_stats: dict[str, Any],
+) -> dict[str, Any]:
+    selected_items = pipeline["bucket_results"]["semicolon_split_exact_definition_also_pr"]["selected_items"]
+    consumed_entries: list[dict[str, Any]] = []
+    added_readings: list[dict[str, Any]] = []
+
+    for item in sorted(selected_items, key=pair_source_form_id):
+        context = item["context"].get("semicolon_split_exact_definition_also_pr")
+        if not context:
+            raise ValueError(f"Semicolon-split exact-definition also-pr bucket lacks context: {item!r}")
+        if set(context["source_expanded_definitions"]) != set(context["dictionary_expanded_definitions"]):
+            raise ValueError(f"Semicolon-split exact-definition also-pr bucket has mismatched definitions: {item!r}")
+
+        word, form, _, _ = target_word_and_form_from_pair(state, item)
+        entry = deck_entry_for_pair(deck_entries, item)
+        apply_entry_metadata_to_selected_form(word, form, entry)
+        old_readings = list(form.pinyin_readings)
+        requested_readings = [
+            pinyin_reading_in_reference_spacing(reading, item["dictionary"]["pinyin"])
+            for reading in matching_also_pr_reading_values(item, "semicolon_split_exact_definition_also_pr")
+        ]
+        added = form.add_pinyin_readings(" / ".join(requested_readings))
+        word.sort_forms_by_pinyin()
+        form_stats["matched"] += 1
+        record_form_match(form_stats, "semicolon_split_exact_definition_also_pr")
+
+        added_readings.append(
+            {
+                "entry": entry_summary(entry),
+                "target": item["target"],
+                "dictionary_primary_pinyin": form.pinyin,
+                "requested_pinyin_readings": requested_readings,
+                "old_pinyin_readings": old_readings,
+                "added_pinyin_readings": added,
+                "new_pinyin_readings": list(form.pinyin_readings),
+            }
+        )
+        consumed_entries.append(entry)
+
+    return {
+        "entries": [entry_summary(entry) for entry in consumed_entries],
+        "entry_count": len(consumed_entries),
+        "added_readings": added_readings,
+        "missing_deck_after_pipeline": [],
+        "form_stats": form_stats,
+        "state_effect": (
+            "applied semicolon-split exact-definition tags and metadata and added explicitly attested also-pr readings"
+        ),
     }
 
 
@@ -1231,6 +1300,12 @@ STATE_CONSUMPTION_RULES = {
         state_effect="apply exact-definition tags and metadata directly without changing dictionary Pinyin",
         handler=consume_exact_definition_bucket,
     ),
+    "semicolon_split_exact_definition_also_pr": StateConsumptionRuleDefinition(
+        name="consume_semicolon_split_exact_definition_also_pr_bucket",
+        bucket="semicolon_split_exact_definition_also_pr",
+        state_effect="apply semicolon-split exact-definition tags and metadata and add explicitly attested readings",
+        handler=consume_semicolon_split_exact_definition_also_pr_bucket,
+    ),
     "default_unresolved": StateConsumptionRuleDefinition(
         name="consume_default_unresolved_bucket",
         bucket="default_unresolved",
@@ -1307,6 +1382,16 @@ def apply_pipeline_enrichment_to_state(
     )
     form_stats = exact_definition["form_stats"]
 
+    semicolon_split_exact_definition_also_pr = STATE_CONSUMPTION_RULES[
+        "semicolon_split_exact_definition_also_pr"
+    ].handler(
+        state=state,
+        deck_entries=deck_entries,
+        pipeline=pipeline,
+        form_stats=form_stats,
+    )
+    form_stats = semicolon_split_exact_definition_also_pr["form_stats"]
+
     default_unresolved = STATE_CONSUMPTION_RULES["default_unresolved"].handler(
         state,
         deck_entries,
@@ -1328,6 +1413,7 @@ def apply_pipeline_enrichment_to_state(
         "case_variant_exact_definition": case_variant_exact_definition,
         "exact_definition_also_pr": exact_definition_also_pr,
         "exact_definition": exact_definition,
+        "semicolon_split_exact_definition_also_pr": semicolon_split_exact_definition_also_pr,
         "default_unresolved": {
             key: value for key, value in default_unresolved.items() if key not in {"entries", "form_stats"}
         },
