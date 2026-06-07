@@ -42,6 +42,24 @@ class AudioConfig:
     engine: str = "off"  # "kokoro", "edge_tts", or "off"
 
 
+@dataclass(frozen=True)
+class DeckSelection:
+    mode: str = ""
+    tags: tuple[str, ...] = ()
+    individual_simplified: frozenset[str] = frozenset()
+    config_path: str | None = None
+    config_found: bool = False
+
+    def report(self) -> dict[str, Any]:
+        return {
+            "config_path": self.config_path,
+            "config_found": self.config_found,
+            "mode": self.mode,
+            "tags": list(self.tags),
+            "individual_simplified": sorted(self.individual_simplified),
+        }
+
+
 DEFAULT_CARD_SETTINGS: dict[str, dict[str, dict[str, Any]]] = {
     "Meaning": {
         "front": {
@@ -107,9 +125,7 @@ class DeckConfig:
     card_types: tuple[str, ...] = tuple(CARD_TYPES)
     audio: AudioConfig = field(default_factory=AudioConfig)
     card_settings: dict[str, dict[str, dict[str, Any]]] = field(default_factory=default_card_settings)
-    mode: str = ""
-    tags: tuple[str, ...] = ()
-    individual_simplified: frozenset[str] = frozenset()
+    selection: DeckSelection = field(default_factory=DeckSelection)
 
     def template_files(self, card_type: str) -> tuple[Path, Path]:
         mapping = {
@@ -146,24 +162,28 @@ def load_deck_config(path: Path | None = None) -> DeckConfig:
     if path is None:
         path = DEFAULT_CONFIG_PATH
     if not path.exists():
-        return DeckConfig()
+        return DeckConfig(selection=DeckSelection(config_path=str(path), config_found=False))
 
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError("deck config must be an object")
     defaults = DeckConfig()
-    selection = raw.get("selection", {})
+    selection = raw.get("selection")
     if selection is None:
-        selection = {}
+        raise ValueError("deck config must define a 'selection' object")
     if not isinstance(selection, dict):
         raise ValueError("deck config selection must be an object")
 
-    individual_simplified: frozenset[str] = frozenset()
-    raw_individual = selection.get("individual_simplified", [])
-    if isinstance(raw_individual, list):
-        individual_simplified = frozenset(s for s in (str(item).strip() for item in raw_individual) if s)
+    return DeckConfig(
+        card_types=merge_card_types(raw.get("card_types"), defaults.card_types),
+        audio=merge_audio_config(raw.get("audio"), defaults.audio),
+        card_settings=merge_card_settings(raw.get("card_settings"), defaults.card_settings),
+        selection=parse_deck_selection(selection, path),
+    )
 
-    tags_raw = selection.get("tags", [])
+
+def parse_deck_selection(raw: dict[str, Any], config_path: Path) -> DeckSelection:
+    tags_raw = raw.get("tags", [])
     if isinstance(tags_raw, str):
         tags = (tags_raw,)
     elif isinstance(tags_raw, list):
@@ -171,14 +191,24 @@ def load_deck_config(path: Path | None = None) -> DeckConfig:
     else:
         tags = ()
 
-    return DeckConfig(
-        card_types=merge_card_types(raw.get("card_types"), defaults.card_types),
-        audio=merge_audio_config(raw.get("audio"), defaults.audio),
-        card_settings=merge_card_settings(raw.get("card_settings"), defaults.card_settings),
-        mode=str(selection.get("mode", "")),
+    return DeckSelection(
+        mode=str(raw.get("mode", "")),
         tags=tags,
-        individual_simplified=individual_simplified,
+        individual_simplified=parse_simplified_list(
+            raw.get("individual_simplified", []),
+            "individual_simplified",
+        ),
+        config_path=str(config_path),
+        config_found=True,
     )
+
+
+def parse_simplified_list(value: Any, field_name: str) -> frozenset[str]:
+    if value is None:
+        return frozenset()
+    if not isinstance(value, list):
+        raise ValueError(f"deck config selection.{field_name} must be a list")
+    return frozenset(simplified for simplified in (str(item or "").strip() for item in value) if simplified)
 
 
 def parse_bool(value: Any, field_name: str) -> bool:

@@ -14,7 +14,7 @@ from typing import Any
 import genanki
 
 from anki_hanzi.audio.generation import AudioGenerator
-from anki_hanzi.deck import DeckConfig
+from anki_hanzi.deck import DeckConfig, DeckSelection
 from anki_hanzi.deck import common
 from anki_hanzi.enrichment import xiehanzi as xiehanzi_enrichment
 from anki_hanzi.lexicon import ENRICHED_LEXICON_SCHEMA, LexiconForm, LexiconState, LexiconWord
@@ -85,24 +85,6 @@ class EnrichedWordEntry:
 
 
 @dataclass(frozen=True)
-class DeckSelection:
-    mode: str
-    tags: tuple[str, ...]
-    individual_simplified: frozenset[str]
-    config_path: str | None
-    config_found: bool
-
-    def report(self) -> dict[str, Any]:
-        return {
-            "config_path": self.config_path,
-            "config_found": self.config_found,
-            "mode": self.mode,
-            "tags": list(self.tags),
-            "individual_simplified": sorted(self.individual_simplified),
-        }
-
-
-@dataclass(frozen=True)
 class MeaningFormEntry:
     display_pinyin: str
     form: LexiconForm
@@ -111,45 +93,6 @@ class MeaningFormEntry:
 
 def normalize_simplified(value: Any) -> str:
     return str(value or "").strip()
-
-
-def parse_simplified_list(value: Any, field_name: str) -> frozenset[str]:
-    if value is None:
-        return frozenset()
-    if not isinstance(value, list):
-        raise ValueError(f"deck config selection.{field_name} must be a list")
-    return frozenset(simplified for simplified in (normalize_simplified(item) for item in value) if simplified)
-
-
-def load_deck_selection(config_path: Path | None) -> DeckSelection:
-    if config_path is None or not config_path.exists():
-        raise ValueError("deck config file is required but not found")
-
-    raw = json.loads(config_path.read_text(encoding="utf-8"))
-    selection = raw.get("selection")
-    if selection is None:
-        raise ValueError("deck config must define a 'selection' object")
-    if not isinstance(selection, dict):
-        raise ValueError("deck config selection must be an object")
-
-    tags_raw = selection.get("tags", [])
-    if isinstance(tags_raw, str):
-        tags = (tags_raw,)
-    elif isinstance(tags_raw, list):
-        tags = tuple(str(t) for t in tags_raw)
-    else:
-        tags = ()
-
-    return DeckSelection(
-        mode=str(selection.get("mode", "")),
-        tags=tags,
-        individual_simplified=parse_simplified_list(
-            selection.get("individual_simplified", []),
-            "individual_simplified",
-        ),
-        config_path=str(config_path),
-        config_found=True,
-    )
 
 
 def _is_hanzi_char(char: str) -> bool:
@@ -610,11 +553,12 @@ def build_package(
     zip_generated_datetime: tuple[int, int, int, int, int, int] | None,
 ) -> dict[str, Any]:
     config = common.load_deck_config(deck_config_path)
+    if not config.selection.config_found:
+        raise ValueError("deck config file is required but not found")
     audio_generator = AudioGenerator(
         config.audio.engine,
         exceptions_path=DEFAULT_AUDIO_EXCEPTIONS,
     )
-    selection = load_deck_selection(deck_config_path)
     state = build_enriched_state(
         snapshot_manifest=snapshot_manifest,
         source_file=source_file,
@@ -627,7 +571,7 @@ def build_package(
     )
     entries_by_card_type, selection_report = build_entries_from_state(
         state,
-        selection,
+        config.selection,
         audio_generator,
     )
     all_entries = _all_entries(entries_by_card_type)

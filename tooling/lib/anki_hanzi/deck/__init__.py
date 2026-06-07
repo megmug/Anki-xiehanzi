@@ -1,5 +1,5 @@
 """Deck model, template, media, and configuration helpers."""
 
-from .common import DeckConfig
+from .common import DeckConfig, DeckSelection
 
-__all__ = ["DeckConfig"]
+__all__ = ["DeckConfig", "DeckSelection"]
