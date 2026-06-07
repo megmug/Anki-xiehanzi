@@ -450,6 +450,7 @@ def new_form_stats() -> dict[str, Any]:
             "exact_definition": 0,
             "exact_definition_also_pr": 0,
             "semicolon_split_exact_definition_also_pr": 0,
+            "html_subform_definition_cover": 0,
             "toneless": 0,
             "created": 0,
         },
@@ -568,6 +569,13 @@ def drop_semicolon_split_exact_definition_also_pr_source_form_pairs(
     return drop_source_form_pairs(selected_items, remaining_items)
 
 
+def drop_html_subform_definition_cover_source_form_pairs(
+    selected_items: list[dict[str, Any]],
+    remaining_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return drop_source_form_pairs(selected_items, remaining_items)
+
+
 def apply_legacy_enrichment_fallback_pairs(
     selected_items: list[dict[str, Any]],
     remaining_items: list[dict[str, Any]],
@@ -637,6 +645,14 @@ CONSUMPTION_RULES = {
         report_only_effect="remove all remaining matching pairs for the semicolon-split exact-definition also-pr form",
         enrichment_effect="apply tags and metadata directly and add explicitly attested also-pr readings",
         handler=drop_semicolon_split_exact_definition_also_pr_source_form_pairs,
+    ),
+    "drop_html_subform_definition_cover_source_form_pairs": ConsumptionRuleDefinition(
+        name="drop_html_subform_definition_cover_source_form_pairs",
+        report_only_effect="remove all remaining matching pairs for the HTML-subform-covered source form",
+        enrichment_effect=(
+            "apply tags and metadata directly to every dictionary form covered by xiehanzi HTML subforms"
+        ),
+        handler=drop_html_subform_definition_cover_source_form_pairs,
     ),
     "apply_legacy_enrichment_fallback": ConsumptionRuleDefinition(
         name="apply_legacy_enrichment_fallback",
@@ -750,7 +766,13 @@ def target_word_and_form_from_pair(
     target = item.get("target")
     if not isinstance(target, dict):
         raise ValueError(f"Matching pair lacks target identity: {item!r}")
+    return target_word_and_form_from_target(state, target)
 
+
+def target_word_and_form_from_target(
+    state: LexiconState,
+    target: dict[str, Any],
+) -> tuple[LexiconWord, LexiconForm, str, str]:
     word_key = str(target.get("word_key") or "")
     form_key = str(target.get("form_key") or "")
     word = state.words.get(word_key)
@@ -762,6 +784,10 @@ def target_word_and_form_from_pair(
         raise ValueError(f"Target form no longer exists in state: {target!r}")
 
     return word, form, word_key, form_key
+
+
+def target_identity(target: dict[str, Any]) -> tuple[str, str]:
+    return str(target.get("word_key") or ""), str(target.get("form_key") or "")
 
 
 def apply_entry_metadata_to_selected_form(word: LexiconWord, form: LexiconForm, entry: dict[str, Any]) -> None:
@@ -1228,6 +1254,68 @@ def consume_missing_dictionary_word_bucket(
     }
 
 
+def consume_html_subform_definition_cover_bucket(
+    state: LexiconState,
+    deck_entries: list[dict[str, Any]],
+    pipeline: dict[str, Any],
+    form_stats: dict[str, Any],
+) -> dict[str, Any]:
+    selected_items = pipeline["bucket_results"]["html_subform_definition_cover"]["selected_items"]
+    items_by_source_form: dict[int, list[dict[str, Any]]] = {}
+    for item in selected_items:
+        items_by_source_form.setdefault(pair_source_form_id(item), []).append(item)
+
+    consumed_entries: list[dict[str, Any]] = []
+    matched_targets: list[dict[str, Any]] = []
+
+    for source_form_id in sorted(items_by_source_form):
+        source_items = items_by_source_form[source_form_id]
+        context = source_items[0]["context"].get("html_subform_definition_cover")
+        if not context:
+            raise ValueError(f"HTML-subform bucket lacks context: {source_items[0]!r}")
+
+        selected_targets = {target_identity(item["target"]) for item in source_items}
+        context_targets = {target_identity(match["target"]) for match in context.get("matches", [])}
+        if selected_targets != context_targets:
+            raise ValueError(f"HTML-subform bucket selected pairs do not match context coverage: {source_items!r}")
+
+        entry = deck_entries[source_form_id]
+        consumed_entries.append(entry)
+
+        for match in sorted(context["matches"], key=lambda value: int(value["subentry_index"])):
+            word, form, _, _ = target_word_and_form_from_target(state, match["target"])
+            if list(form.definitions) != list(match["target_definitions"]):
+                raise ValueError(f"HTML-subform target definitions changed before consumption: {match!r}")
+            if set(match["subentry_expanded_definitions"]) != set(match["target_expanded_definitions"]):
+                raise ValueError(f"HTML-subform bucket has mismatched expanded definitions: {match!r}")
+
+            apply_entry_metadata_to_selected_form(word, form, entry)
+            form_stats["matched"] += 1
+            record_form_match(form_stats, "html_subform_definition_cover")
+            matched_targets.append(
+                {
+                    "entry": entry_summary(entry),
+                    "subentry_index": match["subentry_index"],
+                    "subentry_pinyin": match["subentry_pinyin"],
+                    "target": match["target"],
+                    "target_pinyin": form.pinyin,
+                    "target_definitions": list(form.definitions),
+                }
+            )
+
+    return {
+        "entries": [entry_summary(entry) for entry in consumed_entries],
+        "entry_count": len(consumed_entries),
+        "target_form_count": len(matched_targets),
+        "matched_targets": matched_targets,
+        "missing_deck_after_pipeline": [],
+        "form_stats": form_stats,
+        "state_effect": (
+            "applied HTML-subform tags and metadata directly without changing dictionary Pinyin or definitions"
+        ),
+    }
+
+
 def consume_default_unresolved_bucket(
     state: LexiconState,
     deck_entries: list[dict[str, Any]],
@@ -1305,6 +1393,12 @@ STATE_CONSUMPTION_RULES = {
         bucket="semicolon_split_exact_definition_also_pr",
         state_effect="apply semicolon-split exact-definition tags and metadata and add explicitly attested readings",
         handler=consume_semicolon_split_exact_definition_also_pr_bucket,
+    ),
+    "html_subform_definition_cover": StateConsumptionRuleDefinition(
+        name="consume_html_subform_definition_cover_bucket",
+        bucket="html_subform_definition_cover",
+        state_effect="apply HTML-subform tags and metadata directly without changing dictionary Pinyin or definitions",
+        handler=consume_html_subform_definition_cover_bucket,
     ),
     "default_unresolved": StateConsumptionRuleDefinition(
         name="consume_default_unresolved_bucket",
@@ -1392,6 +1486,14 @@ def apply_pipeline_enrichment_to_state(
     )
     form_stats = semicolon_split_exact_definition_also_pr["form_stats"]
 
+    html_subform_definition_cover = STATE_CONSUMPTION_RULES["html_subform_definition_cover"].handler(
+        state=state,
+        deck_entries=deck_entries,
+        pipeline=pipeline,
+        form_stats=form_stats,
+    )
+    form_stats = html_subform_definition_cover["form_stats"]
+
     default_unresolved = STATE_CONSUMPTION_RULES["default_unresolved"].handler(
         state,
         deck_entries,
@@ -1414,6 +1516,7 @@ def apply_pipeline_enrichment_to_state(
         "exact_definition_also_pr": exact_definition_also_pr,
         "exact_definition": exact_definition,
         "semicolon_split_exact_definition_also_pr": semicolon_split_exact_definition_also_pr,
+        "html_subform_definition_cover": html_subform_definition_cover,
         "default_unresolved": {
             key: value for key, value in default_unresolved.items() if key not in {"entries", "form_stats"}
         },

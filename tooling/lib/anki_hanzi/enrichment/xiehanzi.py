@@ -100,6 +100,13 @@ BUCKET_DESCRIPTIONS = {
         "extra also-pr reading. The source form is resolved by applying tags and metadata directly and adding the "
         "explicitly attested also-pr readings to the selected dictionary form."
     ),
+    "html_subform_definition_cover": (
+        "A remaining source form is internally split by xiehanzi HTML Pinyin/definition blocks. Each HTML subform "
+        "has exactly one strict-Pinyin dictionary candidate whose definition set matches after rule-local semicolon "
+        "splitting, and the matched subforms cover all remaining dictionary candidates exactly once. The source form "
+        "is resolved by applying tags and metadata directly to every covered dictionary form without changing "
+        "dictionary Pinyin or definitions."
+    ),
     "missing_dictionary_word": (
         "No exact Simplified word exists in CC-CEDICT. The source form is resolved by creating synthetic words/forms "
         "from the xiehanzi source entry."
@@ -215,6 +222,15 @@ BUCKET_DEFINITIONS = {
         report_items=False,
         matching_rules=("semicolon_split_exact_definition_also_pr_unique",),
         consumption_rule="drop_semicolon_split_exact_definition_also_pr_source_form_pairs",
+    ),
+    "html_subform_definition_cover": BucketDefinition(
+        name="html_subform_definition_cover",
+        priority=80,
+        phase="pair_pipeline",
+        description=BUCKET_DESCRIPTIONS["html_subform_definition_cover"],
+        report_items=False,
+        matching_rules=("html_subform_definition_cover_unique",),
+        consumption_rule="drop_html_subform_definition_cover_source_form_pairs",
     ),
     "default_unresolved": BucketDefinition(
         name="default_unresolved",
@@ -686,6 +702,7 @@ def build_matching_report(
             "spoken_tone_variant",
             "exact_definition_also_pr",
             "semicolon_split_exact_definition_also_pr",
+            "html_subform_definition_cover",
         ):
             if extra_key in context:
                 report[extra_key] = context[extra_key]
@@ -912,6 +929,9 @@ def enrich_state(
         "hanzi_form_semicolon_split_exact_definition_also_pr_matches": form_stats["match_types"][
             "semicolon_split_exact_definition_also_pr"
         ],
+        "hanzi_form_html_subform_definition_cover_matches": form_stats["match_types"][
+            "html_subform_definition_cover"
+        ],
         "hanzi_form_pinyin_variant_matches": form_stats["matched_pinyin_variant"],
         "hanzi_form_toneless_matches": form_stats["matched_toneless"],
         "hanzi_form_stubs_created": form_stats["created"],
@@ -979,6 +999,11 @@ def enrich_state(
                 for key, value in pipeline_enrichment["semicolon_split_exact_definition_also_pr"].items()
                 if key not in {"added_readings", "entries", "form_stats"}
             },
+            "html_subform_definition_cover": {
+                key: value
+                for key, value in pipeline_enrichment["html_subform_definition_cover"].items()
+                if key not in {"entries", "form_stats", "matched_targets"}
+            },
             "default_unresolved": pipeline_enrichment["default_unresolved"],
         },
         "frequency_enrichment": frequency_enrichment,
@@ -1001,6 +1026,12 @@ def enrich_state(
             "semicolon_split_exact_definition_also_pr_entries": pipeline_enrichment[
                 "semicolon_split_exact_definition_also_pr"
             ]["entries"][:25],
+            "html_subform_definition_cover_entries": pipeline_enrichment["html_subform_definition_cover"]["entries"][
+                :25
+            ],
+            "html_subform_definition_cover_targets": pipeline_enrichment["html_subform_definition_cover"][
+                "matched_targets"
+            ][:25],
             "default_fallback_entries": pipeline_enrichment["default_fallback_entries"][:25],
             "hanzi_form_stubs": form_stats["created_entries"],
             "hanzi_non_exact_definition_mismatches": form_stats["non_exact_definition_mismatches"],

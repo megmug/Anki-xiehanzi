@@ -16,6 +16,7 @@ from anki_hanzi.enrichment.xiehanzi_rule_helpers import (
     normalize_pinyin_u_variants,
     pinyin_rule_kind as classify_pinyin,
     pinyin_rule_readings as pinyin_readings,
+    strip_html_text,
 )
 from anki_hanzi.enrichment.xiehanzi_consumption import bucket_source_form_ids, pair_source_form_id
 
@@ -24,6 +25,10 @@ RuleHandler = Callable[..., dict[str, Any]]
 
 PINYIN_NUMBERED_TOKEN_RE = re.compile(r"[A-Za-züÜv:]+[1-5]?")
 ALSO_PR_RE = re.compile(r"also\s+pr\.\s*\[([^\]]+)\]", re.IGNORECASE)
+PINYIN_BLOCK_RE = re.compile(
+    r'<span\s+class="pinYinWrapper"[^>]*>(?P<pinyin>.*?)</span>\s*<ul>(?P<definitions>.*?)</ul>',
+    re.IGNORECASE | re.DOTALL,
+)
 SEMICOLON_SPLIT_RE = re.compile(r"\s*;\s*")
 MANUAL_PINYIN_OVERRIDES = {
     ("标致", "7-9"): {
@@ -173,6 +178,7 @@ def matching_pair_report(
         "target": candidate["target"],
         "dictionary": candidate["dictionary"],
         "source_definitions": candidate["source_definitions"],
+        "source_meaning_html": entry_report["entry"]["meaning_html"],
         "context": {
             "source_form_id": entry_report["source_form_id"],
             "candidate_count_for_source": candidate_summary["candidate_count"],
@@ -429,6 +435,102 @@ def matching_pair_with_semicolon_split_exact_definition_also_pr(
     pair["context"] = {
         **pair["context"],
         "semicolon_split_exact_definition_also_pr": context,
+    }
+    return pair
+
+
+def source_html_subentries(meaning_html: str) -> list[dict[str, Any]]:
+    subentries: list[dict[str, Any]] = []
+    for index, match in enumerate(PINYIN_BLOCK_RE.finditer(meaning_html or ""), start=1):
+        pinyin = strip_html_text(match.group("pinyin"))
+        definitions = definitions_from_meaning_html(match.group("definitions"))
+        if not pinyin or not definitions:
+            continue
+        subentries.append(
+            {
+                "index": index,
+                "pinyin": pinyin,
+                "definitions": definitions,
+                "expanded_definitions": split_semicolon_definitions(definitions),
+            }
+        )
+    return subentries
+
+
+def html_subform_match_context(source_pairs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not source_pairs:
+        return None
+
+    source_meaning_html = str(source_pairs[0].get("source_meaning_html") or "")
+    subentries = source_html_subentries(source_meaning_html)
+    if not subentries:
+        return None
+
+    matches: list[dict[str, Any]] = []
+    matched_pair_ids: set[tuple[int, int]] = set()
+    for subentry in subentries:
+        matching_pairs: list[dict[str, Any]] = []
+        for pair in source_pairs:
+            if classify_pinyin(subentry["pinyin"], pair["dictionary"]["pinyin"]) != "exact":
+                continue
+            if not semicolon_split_definition_sets_exact(
+                list(subentry["definitions"]),
+                list(pair["dictionary"].get("definitions", [])),
+            ):
+                continue
+            matching_pairs.append(pair)
+
+        if len(matching_pairs) != 1:
+            return None
+
+        pair = matching_pairs[0]
+        pair_id = matching_pair_identity(pair)
+        if pair_id is None or pair_id in matched_pair_ids:
+            return None
+        matched_pair_ids.add(pair_id)
+
+        dictionary_definitions = list(pair["dictionary"].get("definitions", []))
+        row_pinyin_match = classify_pinyin(pair["source"]["pinyin"], pair["dictionary"]["pinyin"])
+        matches.append(
+            {
+                "subentry_index": subentry["index"],
+                "subentry_pinyin": subentry["pinyin"],
+                "subentry_definitions": list(subentry["definitions"]),
+                "subentry_expanded_definitions": list(subentry["expanded_definitions"]),
+                "target": pair["target"],
+                "target_pinyin": pair["dictionary"]["pinyin"],
+                "target_definitions": dictionary_definitions,
+                "target_expanded_definitions": split_semicolon_definitions(dictionary_definitions),
+                "row_pinyin_match": row_pinyin_match,
+            }
+        )
+
+    source_pair_ids = {matching_pair_identity(pair) for pair in source_pairs}
+    if matched_pair_ids != {pair_id for pair_id in source_pair_ids if pair_id is not None}:
+        return None
+
+    return {
+        "source_subentry_count": len(subentries),
+        "matched_target_count": len(matches),
+        "row_pinyin": source_pairs[0]["source"]["pinyin"],
+        "row_pinyin_matched_target_count": sum(
+            1 for match in matches if match["row_pinyin_match"] in {"exact", "format_variant", "case_variant"}
+        ),
+        "matches": matches,
+    }
+
+
+def matching_pair_with_html_subform_definition_cover(
+    item: dict[str, Any],
+    context: dict[str, Any],
+    *,
+    bucket: str,
+    matching_rule: str,
+) -> dict[str, Any]:
+    pair = matching_pair_for_bucket(item, bucket=bucket, matching_rule=matching_rule)
+    pair["context"] = {
+        **pair["context"],
+        "html_subform_definition_cover": context,
     }
     return pair
 
@@ -803,6 +905,52 @@ def match_semicolon_split_exact_definition_also_pr_pairs(
     }
 
 
+def match_html_subform_definition_cover_pairs(
+    working_pairs: list[dict[str, Any]],
+    bucket: str,
+    matching_rule: str,
+) -> dict[str, Any]:
+    pairs_by_source_form: dict[int, list[dict[str, Any]]] = {}
+    for pair in working_pairs:
+        pairs_by_source_form.setdefault(pair_source_form_id(pair), []).append(pair)
+
+    selected_pair_ids: set[tuple[int, int]] = set()
+    context_by_pair_id: dict[tuple[int, int], dict[str, Any]] = {}
+    for source_pairs in pairs_by_source_form.values():
+        context = html_subform_match_context(source_pairs)
+        if context is None:
+            continue
+
+        for pair in source_pairs:
+            pair_id = matching_pair_identity(pair)
+            if pair_id is None:
+                continue
+            selected_pair_ids.add(pair_id)
+            context_by_pair_id[pair_id] = context
+
+    selected_items: list[dict[str, Any]] = []
+    remaining_items: list[dict[str, Any]] = []
+    for pair in working_pairs:
+        pair_id = matching_pair_identity(pair)
+        if pair_id in selected_pair_ids:
+            selected_items.append(
+                matching_pair_with_html_subform_definition_cover(
+                    pair,
+                    context_by_pair_id[pair_id],
+                    bucket=bucket,
+                    matching_rule=matching_rule,
+                )
+            )
+        else:
+            remaining_items.append(pair)
+
+    return {
+        "selected_items": selected_items,
+        "remaining_items": remaining_items,
+        "selected_source_form_ids": bucket_source_form_ids(selected_items),
+    }
+
+
 def match_unique_pinyin_kind_pairs(
     working_pairs: list[dict[str, Any]],
     *,
@@ -955,6 +1103,19 @@ MATCHING_RULES = {
             "readings"
         ),
         handler=match_semicolon_split_exact_definition_also_pr_pairs,
+    ),
+    "html_subform_definition_cover_unique": MatchingRuleDefinition(
+        name="html_subform_definition_cover_unique",
+        scope="pair_pipeline",
+        requires=(
+            "No higher-priority pair-pipeline step consumed this source form",
+            "The xiehanzi HTML contains one or more Pinyin/definition subentries",
+            "Each HTML subentry has exactly one strict-Pinyin dictionary candidate whose definition set matches "
+            "after rule-local semicolon splitting",
+            "The matched subentries cover every remaining dictionary candidate for the source form exactly once",
+        ),
+        selected_pair="all pairs in the source form whose dictionary forms are covered by xiehanzi HTML subentries",
+        handler=match_html_subform_definition_cover_pairs,
     ),
     "default_unresolved": MatchingRuleDefinition(
         name="default_unresolved",
