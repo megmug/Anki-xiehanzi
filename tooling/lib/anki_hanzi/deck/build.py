@@ -16,20 +16,20 @@ import genanki
 from anki_hanzi.audio.generation import AudioGenerator
 from anki_hanzi.deck import DeckConfig
 from anki_hanzi.deck import common
-from anki_hanzi.enrichment.xiehanzi import (
-    DEFAULT_FREQUENCY_LIST,
-    DEFAULT_HSK_DATA_DIR,
-    DEFAULT_MASTER_DB,
-    DEFAULT_MATCHING_REPORT,
-    DEFAULT_OUTPUT as DEFAULT_ENRICHED_DB_OUTPUT,
-    DEFAULT_REPORT as DEFAULT_ENRICHMENT_REPORT,
-    HANZI_DEDUPE_KEY,
-    enrich_state,
-)
+from anki_hanzi.enrichment import xiehanzi as xiehanzi_enrichment
 from anki_hanzi.lexicon import ENRICHED_LEXICON_SCHEMA, LexiconForm, LexiconState, LexiconWord
 from anki_hanzi.lexicon.cc_cedict import load_cedict_state, load_snapshot_manifest, resolve_source_file
 from anki_hanzi.rendering.meaning_html import numbered_to_display, render_meaning_group, render_meaning_html
 
+
+DEFAULT_FREQUENCY_LIST = xiehanzi_enrichment.DEFAULT_FREQUENCY_LIST
+DEFAULT_HSK_DATA_DIR = xiehanzi_enrichment.DEFAULT_HSK_DATA_DIR
+DEFAULT_MASTER_DB = xiehanzi_enrichment.DEFAULT_MASTER_DB
+DEFAULT_MATCHING_REPORT = xiehanzi_enrichment.DEFAULT_MATCHING_REPORT
+DEFAULT_ENRICHED_DB_OUTPUT = xiehanzi_enrichment.DEFAULT_OUTPUT
+DEFAULT_ENRICHMENT_REPORT = xiehanzi_enrichment.DEFAULT_REPORT
+HANZI_DEDUPE_KEY = xiehanzi_enrichment.HANZI_DEDUPE_KEY
+enrich_state = xiehanzi_enrichment.enrich_state
 
 DEFAULT_SNAPSHOT_MANIFEST = Path("deck_inputs/cc-cedict/snapshot.json")
 DEFAULT_DECK_CONFIG = Path("deck_inputs/deck_config.json")
@@ -342,10 +342,10 @@ def _display_pinyin_readings(forms: list[LexiconForm]) -> str:
     seen: set[str] = set()
     for form in forms:
         for display_pinyin in _resolve_display_pinyin_readings(form):
-            normalized_pinyin = common.normalized_note_pinyin(display_pinyin)
-            if not normalized_pinyin or normalized_pinyin in seen:
+            display_key = display_pinyin.strip()
+            if not display_key or display_key in seen:
                 continue
-            seen.add(normalized_pinyin)
+            seen.add(display_key)
             readings.append(display_pinyin)
     return " / ".join(readings)
 
