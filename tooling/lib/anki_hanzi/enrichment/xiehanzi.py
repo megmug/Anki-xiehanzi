@@ -10,12 +10,8 @@ The optional enriched JSON and report are diagnostic build artifacts.
 
 from __future__ import annotations
 
-import csv
-import html
 import json
-import re
 from collections import Counter
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -29,15 +25,25 @@ from anki_hanzi.enrichment.frequency import (
     TOP_FREQUENCY_THRESHOLDS,
     apply_frequency_enrichment_to_state,
 )
+from anki_hanzi.enrichment.xiehanzi_buckets import (
+    BUCKET_DEFINITIONS,
+    BucketDefinition,
+    bucket_definitions_by_phase,
+    bucket_definitions_by_priority,
+)
 from anki_hanzi.enrichment.xiehanzi_consumption import (
-    CONSUMPTION_RULES,
     apply_pipeline_enrichment_to_state,
-    bucket_matching_pair_count,
-    bucket_source_form_ids,
+)
+from anki_hanzi.enrichment.xiehanzi_model import bucket_matching_pair_count, bucket_source_form_ids
+from anki_hanzi.enrichment.xiehanzi_source import (
+    HANZI_DEDUPE_KEY,
+    HANZI_FIELDS,
+    LEVELS,
+    dedupe_entries,
     entry_summary,
+    load_hanzi_entries,
 )
 from anki_hanzi.enrichment.xiehanzi_matching import (
-    MATCHING_RULES,
     TargetFormRef,
     build_source_entry_reports,
     build_target_form_index,
@@ -53,7 +59,6 @@ DEFAULT_REPORT = Path("master_db_output/hanzi_enrichment_report.json")
 DEFAULT_MATCHING_REPORT = Path("master_db_output/hanzi_matching_report.json")
 DEFAULT_DECK_INPUTS_DIR = Path("deck_inputs")
 DEFAULT_HSK_DATA_DIR = DEFAULT_DECK_INPUTS_DIR / "hsk-3.0-words-list/New HSK (2025)/Anki xiehanzi"
-HANZI_DEDUPE_KEY = "Simplified + raw Pinyin"
 
 
 def write_json(path: Path, data: Any) -> None:
@@ -62,341 +67,6 @@ def write_json(path: Path, data: Any) -> None:
         json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-
-
-BUCKET_DESCRIPTIONS = {
-    "perfect_match": (
-        "A source form has exactly one remaining dictionary candidate with the same complete strict numbered "
-        "preserve-case Pinyin reading list. The source form is resolved and all of its candidate pairs are consumed."
-    ),
-    "manual_pinyin_override": (
-        "A configured manual Pinyin correction has exactly one remaining strict or format-variant dictionary "
-        "candidate. The source form is resolved with the corrected Pinyin value."
-    ),
-    "format_variant_unique": (
-        "A source form has exactly one remaining dictionary candidate whose complete compact preserve-case Pinyin "
-        "reading list matches after spacing and separator differences. The source form is resolved without changing "
-        "dictionary Pinyin or definitions."
-    ),
-    "spoken_tone_variant": (
-        "A source form has exactly one remaining dictionary candidate whose toneless Pinyin matches. Every tone "
-        "difference between source and dictionary Pinyin is fully explained by recognized spoken variants: 一 "
-        "sandhi, 不 sandhi, or neutral-tone differences with matching reading and syllable structure. The source "
-        "form is consumed by adding the source tones in dictionary Pinyin format as an accepted reading on the "
-        "selected dictionary form."
-    ),
-    "case_variant_exact_definition": (
-        "A source form has exactly one remaining dictionary candidate whose Pinyin differs by case after spacing "
-        "and separator normalization, and whose complete normalized definition set matches exactly. The source form "
-        "is resolved by applying tags and metadata to the selected dictionary form without changing dictionary "
-        "Pinyin or definitions."
-    ),
-    "exact_definition_also_pr": (
-        "A source form has exactly one remaining dictionary candidate whose complete normalized definition set "
-        "matches exactly. Every source Pinyin reading is either already on the dictionary form or explicitly listed "
-        "in the dictionary definitions as also pr., and at least one source reading is such an extra also-pr reading. "
-        "The source form is resolved by applying tags and metadata directly and adding the explicitly attested "
-        "also-pr readings to the selected dictionary form."
-    ),
-    "exact_definition": (
-        "A source form has exactly one remaining dictionary candidate whose complete normalized definition set "
-        "matches exactly. The source form is resolved by applying tags and metadata directly to the selected "
-        "dictionary form without changing dictionary Pinyin or definitions."
-    ),
-    "semicolon_split_exact_definition_also_pr": (
-        "A source form has exactly one remaining dictionary candidate whose complete normalized definition set "
-        "matches after rule-local semicolon splitting. Every source Pinyin reading is either already on the "
-        "dictionary form or explicitly listed in the dictionary definitions as also pr., and at least one source "
-        "reading is such an extra also-pr reading. The source form is resolved by applying tags and metadata "
-        "directly and adding the explicitly attested also-pr readings to the selected dictionary form."
-    ),
-    "html_subform_definition_cover": (
-        "A remaining source form is internally split by xiehanzi HTML Pinyin/definition blocks. Each HTML subform "
-        "has exactly one strict numbered preserve-case Pinyin dictionary candidate whose normalized definition set "
-        "matches after rule-local semicolon splitting, and the matched subforms cover all remaining dictionary "
-        "candidates exactly once. The source form is resolved by applying tags and metadata directly to every "
-        "covered dictionary form without changing dictionary Pinyin or definitions."
-    ),
-    "missing_dictionary_word": (
-        "No exact Simplified target key exists in CC-CEDICT. The source form is resolved by creating synthetic "
-        "words/forms from the xiehanzi source entry."
-    ),
-    "default_unresolved": (
-        "No higher-priority bucket resolved the source form. This bucket must stay empty; the build aborts if any "
-        "matching pairs reach it."
-    ),
-}
-
-LEVELS = ["1", "2", "3", "4", "5", "6", "7-9"]
-HANZI_FIELDS = [
-    "Simplified",
-    "Pinyin",
-    "Level",
-    "PoS",
-    "Frequency",
-    "Meaning HTML",
-]
-XIEHANZI_TSV_MIN_COLUMNS = 8
-XIEHANZI_SIMPLIFIED_COLUMN = 0
-XIEHANZI_PINYIN_COLUMN = 2
-XIEHANZI_LEVEL_COLUMN = 4
-XIEHANZI_POS_COLUMN = 5
-XIEHANZI_FREQUENCY_COLUMN = 6
-XIEHANZI_MEANING_HTML_COLUMN = 7
-
-
-@dataclass(frozen=True)
-class BucketDefinition:
-    name: str
-    priority: int
-    phase: str
-    description: str
-    report_items: bool
-    matching_rules: tuple[str, ...] = ()
-    consumption_rule: str | None = None
-
-
-BUCKET_DEFINITIONS = {
-    "missing_dictionary_word": BucketDefinition(
-        name="missing_dictionary_word",
-        priority=10,
-        phase="source_prelude",
-        description=BUCKET_DESCRIPTIONS["missing_dictionary_word"],
-        report_items=False,
-        matching_rules=("missing_dictionary_word",),
-        consumption_rule="drop_missing_dictionary_word_source_forms",
-    ),
-    "perfect_match": BucketDefinition(
-        name="perfect_match",
-        priority=20,
-        phase="pair_pipeline",
-        description=BUCKET_DESCRIPTIONS["perfect_match"],
-        report_items=False,
-        matching_rules=("strict_pinyin_exact_unique",),
-        consumption_rule="drop_perfect_match_source_form_pairs",
-    ),
-    "manual_pinyin_override": BucketDefinition(
-        name="manual_pinyin_override",
-        priority=30,
-        phase="pair_pipeline",
-        description=BUCKET_DESCRIPTIONS["manual_pinyin_override"],
-        report_items=False,
-        matching_rules=("manual_pinyin_override_unique",),
-        consumption_rule="drop_manual_pinyin_override_source_form_pairs",
-    ),
-    "format_variant_unique": BucketDefinition(
-        name="format_variant_unique",
-        priority=40,
-        phase="pair_pipeline",
-        description=BUCKET_DESCRIPTIONS["format_variant_unique"],
-        report_items=False,
-        matching_rules=("format_variant_unique",),
-        consumption_rule="drop_format_variant_source_form_pairs",
-    ),
-    "spoken_tone_variant": BucketDefinition(
-        name="spoken_tone_variant",
-        priority=50,
-        phase="pair_pipeline",
-        description=BUCKET_DESCRIPTIONS["spoken_tone_variant"],
-        report_items=False,
-        matching_rules=("spoken_tone_variant_unique",),
-        consumption_rule="consume_spoken_tone_variant_source_form_pairs",
-    ),
-    "case_variant_exact_definition": BucketDefinition(
-        name="case_variant_exact_definition",
-        priority=60,
-        phase="pair_pipeline",
-        description=BUCKET_DESCRIPTIONS["case_variant_exact_definition"],
-        report_items=False,
-        matching_rules=("case_variant_exact_definition_unique",),
-        consumption_rule="drop_case_variant_exact_definition_source_form_pairs",
-    ),
-    "exact_definition_also_pr": BucketDefinition(
-        name="exact_definition_also_pr",
-        priority=65,
-        phase="pair_pipeline",
-        description=BUCKET_DESCRIPTIONS["exact_definition_also_pr"],
-        report_items=False,
-        matching_rules=("exact_definition_also_pr_unique",),
-        consumption_rule="drop_exact_definition_also_pr_source_form_pairs",
-    ),
-    "exact_definition": BucketDefinition(
-        name="exact_definition",
-        priority=70,
-        phase="pair_pipeline",
-        description=BUCKET_DESCRIPTIONS["exact_definition"],
-        report_items=False,
-        matching_rules=("exact_definition_unique",),
-        consumption_rule="drop_exact_definition_source_form_pairs",
-    ),
-    "semicolon_split_exact_definition_also_pr": BucketDefinition(
-        name="semicolon_split_exact_definition_also_pr",
-        priority=75,
-        phase="pair_pipeline",
-        description=BUCKET_DESCRIPTIONS["semicolon_split_exact_definition_also_pr"],
-        report_items=False,
-        matching_rules=("semicolon_split_exact_definition_also_pr_unique",),
-        consumption_rule="drop_semicolon_split_exact_definition_also_pr_source_form_pairs",
-    ),
-    "html_subform_definition_cover": BucketDefinition(
-        name="html_subform_definition_cover",
-        priority=80,
-        phase="pair_pipeline",
-        description=BUCKET_DESCRIPTIONS["html_subform_definition_cover"],
-        report_items=False,
-        matching_rules=("html_subform_definition_cover_unique",),
-        consumption_rule="drop_html_subform_definition_cover_source_form_pairs",
-    ),
-    "default_unresolved": BucketDefinition(
-        name="default_unresolved",
-        priority=1000,
-        phase="terminal",
-        description=BUCKET_DESCRIPTIONS["default_unresolved"],
-        report_items=True,
-        matching_rules=("default_unresolved",),
-        consumption_rule="assert_default_unresolved_empty",
-    ),
-}
-
-
-def strip_html_field(value: str) -> str:
-    value = html.unescape(value or "")
-    value = re.sub(r"<[^>]+>", "", value)
-    return value.strip()
-
-
-def dedupe_key(entry: dict[str, Any]) -> tuple[str, str]:
-    return entry["simplified"], entry["pinyin"]
-
-
-def printable_key(key: tuple[str, str]) -> str:
-    return "::".join(key)
-
-
-def parse_frequency(value: str) -> int | None:
-    value = (value or "").strip()
-    if not value:
-        return None
-    try:
-        return int(value)
-    except ValueError:
-        return None
-
-
-def normalize_hsk_level(value: str) -> str | None:
-    value = (value or "").strip()
-    if not value:
-        return None
-    if value in {"7", "8", "9", "7-9"}:
-        return "7-9"
-    if value in {"1", "2", "3", "4", "5", "6"}:
-        return value
-    return None
-
-
-def level_tags(source_level: str, raw_level: str) -> list[str]:
-    levels: list[str] = []
-    for value in [source_level, *re.findall(r"7-9|[1-9]", raw_level or "")]:
-        normalized = normalize_hsk_level(value)
-        if normalized and normalized not in levels:
-            levels.append(normalized)
-    return [f"hsk:{level}" for level in levels]
-
-
-def make_entry(
-    row: list[str],
-    source: str,
-    source_file: Path,
-    row_number: int,
-    deck_level: str,
-) -> dict[str, Any]:
-    if len(row) < XIEHANZI_TSV_MIN_COLUMNS:
-        raise ValueError(f"Expected at least 8 TSV columns in {source_file}:{row_number}, got {len(row)}: {row!r}")
-
-    simplified = strip_html_field(row[XIEHANZI_SIMPLIFIED_COLUMN])
-    raw_pinyin = row[XIEHANZI_PINYIN_COLUMN]
-    raw_level = row[XIEHANZI_LEVEL_COLUMN]
-    pos = row[XIEHANZI_POS_COLUMN]
-    frequency_text = row[XIEHANZI_FREQUENCY_COLUMN]
-    meaning_html = row[XIEHANZI_MEANING_HTML_COLUMN]
-
-    tags = level_tags(deck_level, raw_level)
-    return {
-        "simplified": simplified,
-        "pinyin": raw_pinyin,
-        "raw_pinyin": raw_pinyin,
-        "deck_level": deck_level,
-        "raw_level": raw_level,
-        "pos": pos,
-        "frequency": parse_frequency(frequency_text),
-        "meaning_html": meaning_html,
-        "source": source,
-        "tags": sorted(set(tags)),
-    }
-
-
-def read_word_file(path: Path, source: str, deck_level: str) -> list[dict[str, Any]]:
-    entries: list[dict[str, Any]] = []
-    with path.open(encoding="utf-8", newline="") as handle:
-        for row_number, row in enumerate(csv.reader(handle, delimiter="\t"), start=1):
-            if not row:
-                continue
-            if row[0].startswith("#"):
-                continue
-            entries.append(
-                make_entry(
-                    row,
-                    source=source,
-                    source_file=path,
-                    row_number=row_number,
-                    deck_level=deck_level,
-                )
-            )
-    return entries
-
-
-def load_hanzi_entries(hsk_data_dir: Path) -> list[dict[str, Any]]:
-    entries: list[dict[str, Any]] = []
-    for level in LEVELS:
-        path = hsk_data_dir / f"HSK_Level_{level}.txt"
-        entries.extend(read_word_file(path, source=f"HSK {level}", deck_level=level))
-
-    return entries
-
-
-def dedupe_entries(entries: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    kept_by_key: dict[tuple[str, str], dict[str, Any]] = {}
-    kept_entries: list[dict[str, Any]] = []
-    dropped_duplicates: list[dict[str, Any]] = []
-    next_deck_order = {level: 0 for level in LEVELS}
-
-    for entry in entries:
-        key = dedupe_key(entry)
-        existing = kept_by_key.get(key)
-        if existing is None:
-            entry["deck_order"] = next_deck_order[entry["deck_level"]]
-            next_deck_order[entry["deck_level"]] += 1
-            kept_by_key[key] = entry
-            kept_entries.append(entry)
-            continue
-
-        duplicate_record = {
-            "key": printable_key(key),
-            "kept": entry_summary(existing),
-            "dropped": entry_summary(entry),
-            "reason": "duplicate hanzi entry",
-        }
-        dropped_duplicates.append(duplicate_record)
-
-    return kept_entries, dropped_duplicates
-
-
-def bucket_definitions_by_priority() -> list[BucketDefinition]:
-    return sorted(BUCKET_DEFINITIONS.values(), key=lambda definition: definition.priority)
-
-
-def bucket_definitions_by_phase(phase: str) -> list[BucketDefinition]:
-    return [definition for definition in bucket_definitions_by_priority() if definition.phase == phase]
 
 
 def apply_source_prelude_rules(
@@ -411,18 +81,17 @@ def apply_source_prelude_rules(
         selected_items: list[dict[str, Any]] = []
         input_source_form_count = len(remaining_source_form_ids)
 
-        for rule_name in definition.matching_rules:
-            rule = MATCHING_RULES[rule_name]
+        for rule in definition.matching_rules:
             result = rule.handler(
                 entry_reports_by_id,
                 target_form_index,
                 remaining_source_form_ids,
                 definition.name,
-                rule_name,
+                rule.name,
             )
             selected_items.extend(result["selected_items"])
 
-        consumption_rule = CONSUMPTION_RULES[definition.consumption_rule] if definition.consumption_rule else None
+        consumption_rule = definition.consumption_rule
         consumption = (
             consumption_rule.handler(selected_items, remaining_source_form_ids)
             if consumption_rule is not None
@@ -468,13 +137,12 @@ def apply_pair_pipeline_rules(working_pairs: list[dict[str, Any]]) -> dict[str, 
         input_items = remaining_items
         selected_items: list[dict[str, Any]] = []
 
-        for rule_name in definition.matching_rules:
-            rule = MATCHING_RULES[rule_name]
-            result = rule.handler(input_items, definition.name, rule_name)
+        for rule in definition.matching_rules:
+            result = rule.handler(input_items, definition.name, rule.name)
             selected_items.extend(result["selected_items"])
             remaining_items = result["remaining_items"]
 
-        consumption_rule = CONSUMPTION_RULES[definition.consumption_rule] if definition.consumption_rule else None
+        consumption_rule = definition.consumption_rule
         consumption = (
             consumption_rule.handler(selected_items, remaining_items)
             if consumption_rule is not None
@@ -508,11 +176,10 @@ def apply_pair_pipeline_rules(working_pairs: list[dict[str, Any]]) -> dict[str, 
 
     for definition in bucket_definitions_by_phase("terminal"):
         input_items = remaining_items
-        rule_name = definition.matching_rules[0]
-        rule = MATCHING_RULES[rule_name]
-        result = rule.handler(input_items, definition.name, rule_name)
+        rule = definition.matching_rules[0]
+        result = rule.handler(input_items, definition.name, rule.name)
         selected_items = result["selected_items"]
-        consumption_rule = CONSUMPTION_RULES[definition.consumption_rule] if definition.consumption_rule else None
+        consumption_rule = definition.consumption_rule
         consumption = (
             consumption_rule.handler(selected_items, result["remaining_items"])
             if consumption_rule is not None
@@ -726,8 +393,7 @@ def build_matching_report(
             items = items[:bucket_item_limit]
         return [compact_report_item(item) for item in items]
 
-    def matching_rule_report(rule_name: str) -> dict[str, Any]:
-        rule = MATCHING_RULES[rule_name]
+    def matching_rule_report(rule: Any) -> dict[str, Any]:
         report = {
             "name": rule.name,
             "scope": rule.scope,
@@ -737,10 +403,9 @@ def build_matching_report(
             report["selected_pair"] = rule.selected_pair
         return report
 
-    def consumption_rule_report(rule_name: str | None) -> dict[str, Any] | None:
-        if rule_name is None:
+    def consumption_rule_report(rule: Any | None) -> dict[str, Any] | None:
+        if rule is None:
             return None
-        rule = CONSUMPTION_RULES[rule_name]
         return {
             "name": rule.name,
             "report_only_effect": rule.report_only_effect,
@@ -755,7 +420,7 @@ def build_matching_report(
             "phase": definition.phase,
             "bucket": bucket,
             "description": definition.description,
-            "matching_rules": [matching_rule_report(rule_name) for rule_name in definition.matching_rules],
+            "matching_rules": [matching_rule_report(rule) for rule in definition.matching_rules],
             "consumption_rule": consumption_rule_report(definition.consumption_rule),
             "step_input_source_form_count": result["input_source_form_count"],
             "step_input_matching_pair_count": result["input_matching_pair_count"],
@@ -778,7 +443,7 @@ def build_matching_report(
         result = bucket_result(definition)
         return {
             "description": definition.description,
-            "matching_rules": [matching_rule_report(rule_name) for rule_name in definition.matching_rules],
+            "matching_rules": [matching_rule_report(rule) for rule in definition.matching_rules],
             "item_count": result["selected_matching_pair_count"],
             "items": report_bucket_items(bucket),
         }
@@ -910,7 +575,17 @@ def enrich_state(
     )
 
     missing_raw_entries = [entry_summary(entry) for entry in raw_entries if entry["simplified"] not in base_word_index]
-    pipeline_enrichment = apply_pipeline_enrichment_to_state(master_state, deck_entries, matching_pipeline)
+    state_consumption_rules = tuple(
+        definition.state_consumption_rule
+        for definition in bucket_definitions_by_priority()
+        if definition.state_consumption_rule is not None
+    )
+    pipeline_enrichment = apply_pipeline_enrichment_to_state(
+        master_state,
+        deck_entries,
+        matching_pipeline,
+        state_consumption_rules,
+    )
     missing_deck_entries = pipeline_enrichment["missing_deck_entries"]
     synthetic_words = pipeline_enrichment["synthetic_words"]
     form_stats = pipeline_enrichment["form_stats"]

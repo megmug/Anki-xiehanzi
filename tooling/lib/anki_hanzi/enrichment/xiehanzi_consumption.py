@@ -21,6 +21,12 @@ from anki_hanzi.enrichment.xiehanzi_rule_helpers import (
     normalize_pinyin_u_variants,
     pinyin_rule_kind,
 )
+from anki_hanzi.enrichment.xiehanzi_model import (
+    bucket_matching_pair_count,
+    bucket_source_form_ids,
+    pair_source_form_id,
+)
+from anki_hanzi.enrichment.xiehanzi_source import entry_summary
 
 
 ConsumptionRuleHandler = Callable[..., dict[str, Any]]
@@ -138,21 +144,6 @@ def source_pinyin_in_dictionary_format(source_pinyin: str, dictionary_pinyin: st
         )
 
     return " / ".join(formatted_readings)
-
-
-def entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
-    summary = {
-        "simplified": entry["simplified"],
-        "pinyin": entry["pinyin"],
-        "deck_level": entry["deck_level"],
-        "raw_level": entry["raw_level"],
-        "source": entry["source"],
-    }
-    if entry.get("raw_pinyin") and entry["raw_pinyin"] != entry["pinyin"]:
-        summary["raw_pinyin"] = entry["raw_pinyin"]
-    if entry.get("manual_pinyin_override"):
-        summary["manual_pinyin_override"] = entry["manual_pinyin_override"]
-    return summary
 
 
 def build_synthetic_words(missing_entries: list[dict[str, Any]]) -> list[LexiconWord]:
@@ -294,18 +285,6 @@ def new_form_stats() -> dict[str, Any]:
     }
 
 
-def pair_source_form_id(item: dict[str, Any]) -> int:
-    return int(item["context"]["source_form_id"])
-
-
-def bucket_source_form_ids(items: list[dict[str, Any]]) -> set[int]:
-    return {pair_source_form_id(item) for item in items}
-
-
-def bucket_matching_pair_count(items: list[dict[str, Any]]) -> int:
-    return sum(1 for item in items if "dictionary" in item)
-
-
 def drop_missing_dictionary_word_source_forms(
     selected_items: list[dict[str, Any]],
     remaining_source_form_ids: set[int],
@@ -371,77 +350,72 @@ def assert_default_unresolved_empty_pairs(
     }
 
 
-CONSUMPTION_RULES = {
-    "drop_missing_dictionary_word_source_forms": ConsumptionRuleDefinition(
-        name="drop_missing_dictionary_word_source_forms",
-        report_only_effect="remove the source form from the pair pipeline before any pairs are materialized",
-        enrichment_effect="create synthetic words/forms from xiehanzi source entries",
-        handler=drop_missing_dictionary_word_source_forms,
-    ),
-    "drop_perfect_match_source_form_pairs": ConsumptionRuleDefinition(
-        name="drop_perfect_match_source_form_pairs",
-        report_only_effect="remove all remaining matching pairs for the consumed source form",
-        enrichment_effect="apply exact-pair tags and metadata directly to the selected dictionary form",
-        handler=drop_source_form_pairs,
-    ),
-    "drop_manual_pinyin_override_source_form_pairs": ConsumptionRuleDefinition(
-        name="drop_manual_pinyin_override_source_form_pairs",
-        report_only_effect="remove all remaining matching pairs for the manually corrected source form",
-        enrichment_effect="apply the configured Pinyin override directly to the selected dictionary form",
-        handler=drop_source_form_pairs,
-    ),
-    "drop_format_variant_source_form_pairs": ConsumptionRuleDefinition(
-        name="drop_format_variant_source_form_pairs",
-        report_only_effect="remove all remaining matching pairs for the format-variant source form",
-        enrichment_effect="apply tags and metadata directly to the selected dictionary form without changing Pinyin",
-        handler=drop_source_form_pairs,
-    ),
-    "consume_spoken_tone_variant_source_form_pairs": ConsumptionRuleDefinition(
-        name="consume_spoken_tone_variant_source_form_pairs",
-        report_only_effect="remove all remaining matching pairs for the spoken-tone-variant source form",
-        enrichment_effect="add the source Pinyin as an accepted reading on the selected dictionary form",
-        handler=drop_source_form_pairs,
-    ),
-    "drop_case_variant_exact_definition_source_form_pairs": ConsumptionRuleDefinition(
-        name="drop_case_variant_exact_definition_source_form_pairs",
-        report_only_effect="remove all remaining matching pairs for the exact-definition case-variant source form",
-        enrichment_effect="apply tags and metadata directly to the selected dictionary form without changing Pinyin",
-        handler=drop_source_form_pairs,
-    ),
-    "drop_exact_definition_also_pr_source_form_pairs": ConsumptionRuleDefinition(
-        name="drop_exact_definition_also_pr_source_form_pairs",
-        report_only_effect="remove all remaining matching pairs for the exact-definition also-pr source form",
-        enrichment_effect="apply tags and metadata directly and add explicitly attested also-pr readings",
-        handler=drop_source_form_pairs,
-    ),
-    "drop_exact_definition_source_form_pairs": ConsumptionRuleDefinition(
-        name="drop_exact_definition_source_form_pairs",
-        report_only_effect="remove all remaining matching pairs for the exact-definition source form",
-        enrichment_effect="apply tags and metadata directly to the selected dictionary form without changing Pinyin",
-        handler=drop_source_form_pairs,
-    ),
-    "drop_semicolon_split_exact_definition_also_pr_source_form_pairs": ConsumptionRuleDefinition(
-        name="drop_semicolon_split_exact_definition_also_pr_source_form_pairs",
-        report_only_effect="remove all remaining matching pairs for the semicolon-split exact-definition also-pr form",
-        enrichment_effect="apply tags and metadata directly and add explicitly attested also-pr readings",
-        handler=drop_source_form_pairs,
-    ),
-    "drop_html_subform_definition_cover_source_form_pairs": ConsumptionRuleDefinition(
-        name="drop_html_subform_definition_cover_source_form_pairs",
-        report_only_effect="remove all remaining matching pairs for the HTML-subform-covered source form",
-        enrichment_effect=(
-            "apply tags and metadata directly to every dictionary form covered by xiehanzi HTML subforms"
-        ),
-        handler=drop_source_form_pairs,
-    ),
-    "assert_default_unresolved_empty": ConsumptionRuleDefinition(
-        name="assert_default_unresolved_empty",
-        report_only_effect="assert the terminal default_unresolved bucket is empty",
-        enrichment_effect="abort the build if any source form remains unresolved",
-        handler=assert_default_unresolved_empty_pairs,
-    ),
-}
-
+DROP_MISSING_DICTIONARY_WORD_SOURCE_FORMS_RULE = ConsumptionRuleDefinition(
+    name="drop_missing_dictionary_word_source_forms",
+    report_only_effect="remove the source form from the pair pipeline before any pairs are materialized",
+    enrichment_effect="create synthetic words/forms from xiehanzi source entries",
+    handler=drop_missing_dictionary_word_source_forms,
+)
+DROP_PERFECT_MATCH_SOURCE_FORM_PAIRS_RULE = ConsumptionRuleDefinition(
+    name="drop_perfect_match_source_form_pairs",
+    report_only_effect="remove all remaining matching pairs for the consumed source form",
+    enrichment_effect="apply exact-pair tags and metadata directly to the selected dictionary form",
+    handler=drop_source_form_pairs,
+)
+DROP_MANUAL_PINYIN_OVERRIDE_SOURCE_FORM_PAIRS_RULE = ConsumptionRuleDefinition(
+    name="drop_manual_pinyin_override_source_form_pairs",
+    report_only_effect="remove all remaining matching pairs for the manually corrected source form",
+    enrichment_effect="apply the configured Pinyin override directly to the selected dictionary form",
+    handler=drop_source_form_pairs,
+)
+DROP_FORMAT_VARIANT_SOURCE_FORM_PAIRS_RULE = ConsumptionRuleDefinition(
+    name="drop_format_variant_source_form_pairs",
+    report_only_effect="remove all remaining matching pairs for the format-variant source form",
+    enrichment_effect="apply tags and metadata directly to the selected dictionary form without changing Pinyin",
+    handler=drop_source_form_pairs,
+)
+CONSUME_SPOKEN_TONE_VARIANT_SOURCE_FORM_PAIRS_RULE = ConsumptionRuleDefinition(
+    name="consume_spoken_tone_variant_source_form_pairs",
+    report_only_effect="remove all remaining matching pairs for the spoken-tone-variant source form",
+    enrichment_effect="add the source Pinyin as an accepted reading on the selected dictionary form",
+    handler=drop_source_form_pairs,
+)
+DROP_CASE_VARIANT_EXACT_DEFINITION_SOURCE_FORM_PAIRS_RULE = ConsumptionRuleDefinition(
+    name="drop_case_variant_exact_definition_source_form_pairs",
+    report_only_effect="remove all remaining matching pairs for the exact-definition case-variant source form",
+    enrichment_effect="apply tags and metadata directly to the selected dictionary form without changing Pinyin",
+    handler=drop_source_form_pairs,
+)
+DROP_EXACT_DEFINITION_ALSO_PR_SOURCE_FORM_PAIRS_RULE = ConsumptionRuleDefinition(
+    name="drop_exact_definition_also_pr_source_form_pairs",
+    report_only_effect="remove all remaining matching pairs for the exact-definition also-pr source form",
+    enrichment_effect="apply tags and metadata directly and add explicitly attested also-pr readings",
+    handler=drop_source_form_pairs,
+)
+DROP_EXACT_DEFINITION_SOURCE_FORM_PAIRS_RULE = ConsumptionRuleDefinition(
+    name="drop_exact_definition_source_form_pairs",
+    report_only_effect="remove all remaining matching pairs for the exact-definition source form",
+    enrichment_effect="apply tags and metadata directly to the selected dictionary form without changing Pinyin",
+    handler=drop_source_form_pairs,
+)
+DROP_SEMICOLON_SPLIT_EXACT_DEFINITION_ALSO_PR_SOURCE_FORM_PAIRS_RULE = ConsumptionRuleDefinition(
+    name="drop_semicolon_split_exact_definition_also_pr_source_form_pairs",
+    report_only_effect="remove all remaining matching pairs for the semicolon-split exact-definition also-pr form",
+    enrichment_effect="apply tags and metadata directly and add explicitly attested also-pr readings",
+    handler=drop_source_form_pairs,
+)
+DROP_HTML_SUBFORM_DEFINITION_COVER_SOURCE_FORM_PAIRS_RULE = ConsumptionRuleDefinition(
+    name="drop_html_subform_definition_cover_source_form_pairs",
+    report_only_effect="remove all remaining matching pairs for the HTML-subform-covered source form",
+    enrichment_effect="apply tags and metadata directly to every dictionary form covered by xiehanzi HTML subforms",
+    handler=drop_source_form_pairs,
+)
+ASSERT_DEFAULT_UNRESOLVED_EMPTY_RULE = ConsumptionRuleDefinition(
+    name="assert_default_unresolved_empty",
+    report_only_effect="assert the terminal default_unresolved bucket is empty",
+    enrichment_effect="abort the build if any source form remains unresolved",
+    handler=assert_default_unresolved_empty_pairs,
+)
 
 def deck_entries_for_source_form_ids(
     deck_entries: list[dict[str, Any]], source_form_ids: set[int]
@@ -1044,88 +1018,84 @@ def assert_default_unresolved_bucket_empty(
     }
 
 
-STATE_CONSUMPTION_RULES = {
-    "missing_dictionary_word": StateConsumptionRuleDefinition(
-        name="consume_missing_dictionary_word_bucket",
-        bucket="missing_dictionary_word",
-        state_effect="create synthetic words/forms from xiehanzi source entries",
-        handler=consume_missing_dictionary_word_bucket,
-    ),
-    "perfect_match": StateConsumptionRuleDefinition(
-        name="consume_perfect_match_bucket",
-        bucket="perfect_match",
-        state_effect="apply exact-pair tags and metadata directly to selected dictionary forms",
-        handler=consume_perfect_match_bucket,
-    ),
-    "manual_pinyin_override": StateConsumptionRuleDefinition(
-        name="consume_manual_pinyin_override_bucket",
-        bucket="manual_pinyin_override",
-        state_effect="apply configured Pinyin overrides directly to selected dictionary forms",
-        handler=consume_manual_pinyin_override_bucket,
-    ),
-    "format_variant_unique": StateConsumptionRuleDefinition(
-        name="consume_format_variant_bucket",
-        bucket="format_variant_unique",
-        state_effect="apply format-variant tags and metadata directly without changing dictionary Pinyin",
-        handler=consume_format_variant_bucket,
-    ),
-    "spoken_tone_variant": StateConsumptionRuleDefinition(
-        name="consume_spoken_tone_variant_bucket",
-        bucket="spoken_tone_variant",
-        state_effect="add source Pinyin as accepted readings on selected dictionary forms",
-        handler=consume_spoken_tone_variant_bucket,
-    ),
-    "case_variant_exact_definition": StateConsumptionRuleDefinition(
-        name="consume_case_variant_exact_definition_bucket",
-        bucket="case_variant_exact_definition",
-        state_effect="apply case-variant tags and metadata directly without changing dictionary Pinyin",
-        handler=consume_case_variant_exact_definition_bucket,
-    ),
-    "exact_definition_also_pr": StateConsumptionRuleDefinition(
-        name="consume_exact_definition_also_pr_bucket",
-        bucket="exact_definition_also_pr",
-        state_effect="apply exact-definition tags and metadata and add explicitly attested also-pr readings",
-        handler=consume_exact_definition_also_pr_bucket,
-    ),
-    "exact_definition": StateConsumptionRuleDefinition(
-        name="consume_exact_definition_bucket",
-        bucket="exact_definition",
-        state_effect="apply exact-definition tags and metadata directly without changing dictionary Pinyin",
-        handler=consume_exact_definition_bucket,
-    ),
-    "semicolon_split_exact_definition_also_pr": StateConsumptionRuleDefinition(
-        name="consume_semicolon_split_exact_definition_also_pr_bucket",
-        bucket="semicolon_split_exact_definition_also_pr",
-        state_effect="apply semicolon-split exact-definition tags and metadata and add explicitly attested readings",
-        handler=consume_semicolon_split_exact_definition_also_pr_bucket,
-    ),
-    "html_subform_definition_cover": StateConsumptionRuleDefinition(
-        name="consume_html_subform_definition_cover_bucket",
-        bucket="html_subform_definition_cover",
-        state_effect="apply HTML-subform tags and metadata directly without changing dictionary Pinyin or definitions",
-        handler=consume_html_subform_definition_cover_bucket,
-    ),
-    "default_unresolved": StateConsumptionRuleDefinition(
-        name="assert_default_unresolved_bucket_empty",
-        bucket="default_unresolved",
-        state_effect="assert default_unresolved is empty and make no state changes",
-        handler=assert_default_unresolved_bucket_empty,
-    ),
-}
-
+CONSUME_MISSING_DICTIONARY_WORD_BUCKET_RULE = StateConsumptionRuleDefinition(
+    name="consume_missing_dictionary_word_bucket",
+    bucket="missing_dictionary_word",
+    state_effect="create synthetic words/forms from xiehanzi source entries",
+    handler=consume_missing_dictionary_word_bucket,
+)
+CONSUME_PERFECT_MATCH_BUCKET_RULE = StateConsumptionRuleDefinition(
+    name="consume_perfect_match_bucket",
+    bucket="perfect_match",
+    state_effect="apply exact-pair tags and metadata directly to selected dictionary forms",
+    handler=consume_perfect_match_bucket,
+)
+CONSUME_MANUAL_PINYIN_OVERRIDE_BUCKET_RULE = StateConsumptionRuleDefinition(
+    name="consume_manual_pinyin_override_bucket",
+    bucket="manual_pinyin_override",
+    state_effect="apply configured Pinyin overrides directly to selected dictionary forms",
+    handler=consume_manual_pinyin_override_bucket,
+)
+CONSUME_FORMAT_VARIANT_BUCKET_RULE = StateConsumptionRuleDefinition(
+    name="consume_format_variant_bucket",
+    bucket="format_variant_unique",
+    state_effect="apply format-variant tags and metadata directly without changing dictionary Pinyin",
+    handler=consume_format_variant_bucket,
+)
+CONSUME_SPOKEN_TONE_VARIANT_BUCKET_RULE = StateConsumptionRuleDefinition(
+    name="consume_spoken_tone_variant_bucket",
+    bucket="spoken_tone_variant",
+    state_effect="add source Pinyin as accepted readings on selected dictionary forms",
+    handler=consume_spoken_tone_variant_bucket,
+)
+CONSUME_CASE_VARIANT_EXACT_DEFINITION_BUCKET_RULE = StateConsumptionRuleDefinition(
+    name="consume_case_variant_exact_definition_bucket",
+    bucket="case_variant_exact_definition",
+    state_effect="apply case-variant tags and metadata directly without changing dictionary Pinyin",
+    handler=consume_case_variant_exact_definition_bucket,
+)
+CONSUME_EXACT_DEFINITION_ALSO_PR_BUCKET_RULE = StateConsumptionRuleDefinition(
+    name="consume_exact_definition_also_pr_bucket",
+    bucket="exact_definition_also_pr",
+    state_effect="apply exact-definition tags and metadata and add explicitly attested also-pr readings",
+    handler=consume_exact_definition_also_pr_bucket,
+)
+CONSUME_EXACT_DEFINITION_BUCKET_RULE = StateConsumptionRuleDefinition(
+    name="consume_exact_definition_bucket",
+    bucket="exact_definition",
+    state_effect="apply exact-definition tags and metadata directly without changing dictionary Pinyin",
+    handler=consume_exact_definition_bucket,
+)
+CONSUME_SEMICOLON_SPLIT_EXACT_DEFINITION_ALSO_PR_BUCKET_RULE = StateConsumptionRuleDefinition(
+    name="consume_semicolon_split_exact_definition_also_pr_bucket",
+    bucket="semicolon_split_exact_definition_also_pr",
+    state_effect="apply semicolon-split exact-definition tags and metadata and add explicitly attested readings",
+    handler=consume_semicolon_split_exact_definition_also_pr_bucket,
+)
+CONSUME_HTML_SUBFORM_DEFINITION_COVER_BUCKET_RULE = StateConsumptionRuleDefinition(
+    name="consume_html_subform_definition_cover_bucket",
+    bucket="html_subform_definition_cover",
+    state_effect="apply HTML-subform tags and metadata directly without changing dictionary Pinyin or definitions",
+    handler=consume_html_subform_definition_cover_bucket,
+)
+ASSERT_DEFAULT_UNRESOLVED_BUCKET_EMPTY_RULE = StateConsumptionRuleDefinition(
+    name="assert_default_unresolved_bucket_empty",
+    bucket="default_unresolved",
+    state_effect="assert default_unresolved is empty and make no state changes",
+    handler=assert_default_unresolved_bucket_empty,
+)
 
 def apply_pipeline_enrichment_to_state(
     state: LexiconState,
     deck_entries: list[dict[str, Any]],
     pipeline: dict[str, Any],
+    state_consumption_rules: tuple[StateConsumptionRuleDefinition, ...],
 ) -> dict[str, Any]:
     bucket_results: dict[str, dict[str, Any]] = {}
     form_stats = new_form_stats()
 
-    for bucket, rule in STATE_CONSUMPTION_RULES.items():
-        if rule.bucket != bucket:
-            raise ValueError(f"State consumption rule {rule.name!r} is registered under the wrong bucket {bucket!r}")
-        if bucket == "missing_dictionary_word":
+    for rule in state_consumption_rules:
+        if rule.bucket == "missing_dictionary_word":
             result = rule.handler(state, deck_entries, pipeline)
         else:
             result = rule.handler(
@@ -1137,7 +1107,7 @@ def apply_pipeline_enrichment_to_state(
             form_stats = result.get("form_stats", form_stats)
         result.setdefault("state_effect", rule.state_effect)
         result["state_consumption_rule"] = rule.name
-        bucket_results[bucket] = result
+        bucket_results[rule.bucket] = result
 
     missing_dictionary_word = bucket_results["missing_dictionary_word"]
     default_unresolved = bucket_results["default_unresolved"]

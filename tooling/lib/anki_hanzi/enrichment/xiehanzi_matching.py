@@ -18,11 +18,15 @@ from anki_hanzi.enrichment.xiehanzi_rule_helpers import (
     pinyin_rule_readings as pinyin_readings,
     strip_html_text,
 )
-from anki_hanzi.enrichment.xiehanzi_consumption import bucket_source_form_ids, pair_source_form_id
+from anki_hanzi.enrichment.xiehanzi_model import (
+    PairId,
+    bucket_source_form_ids,
+    group_pairs_by_source_form,
+    matching_pair_identity,
+)
 
 
 RuleHandler = Callable[..., dict[str, Any]]
-PairId = tuple[int, int]
 PairContext = dict[str, Any]
 PairContextPredicate = Callable[[dict[str, Any]], PairContext | None]
 PairPredicate = Callable[[dict[str, Any]], bool]
@@ -196,19 +200,6 @@ def missing_dictionary_word_report(entry_report: dict[str, Any], *, bucket: str,
         "bucket": bucket,
         "matching_rule": matching_rule,
     }
-
-
-def matching_pair_identity(item: dict[str, Any]) -> tuple[int, int] | None:
-    if "dictionary" not in item:
-        return None
-    return (pair_source_form_id(item), int(item["context"]["candidate_index_for_source"]))
-
-
-def group_pairs_by_source_form(working_pairs: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]:
-    pairs_by_source_form: dict[int, list[dict[str, Any]]] = {}
-    for pair in working_pairs:
-        pairs_by_source_form.setdefault(pair_source_form_id(pair), []).append(pair)
-    return pairs_by_source_form
 
 
 def matching_pair_for_bucket(item: dict[str, Any], *, bucket: str, matching_rule: str) -> dict[str, Any]:
@@ -818,133 +809,130 @@ def match_default_unresolved_pairs(
     }
 
 
-MATCHING_RULES = {
-    "missing_dictionary_word": MatchingRuleDefinition(
-        name="missing_dictionary_word",
-        scope="source_prelude",
-        requires=("No exact Simplified target word exists in CC-CEDICT",),
-        handler=match_missing_dictionary_word_sources,
+MISSING_DICTIONARY_WORD_RULE = MatchingRuleDefinition(
+    name="missing_dictionary_word",
+    scope="source_prelude",
+    requires=("No exact Simplified target word exists in CC-CEDICT",),
+    handler=match_missing_dictionary_word_sources,
+)
+STRICT_PINYIN_EXACT_UNIQUE_RULE = MatchingRuleDefinition(
+    name="strict_pinyin_exact_unique",
+    scope="pair_pipeline",
+    requires=(
+        "The working set already contains only exact Simplified-compatible pairs",
+        "Exactly one remaining pair for the source form has complete strict numbered preserve-case Pinyin-list equality",
     ),
-    "strict_pinyin_exact_unique": MatchingRuleDefinition(
-        name="strict_pinyin_exact_unique",
-        scope="pair_pipeline",
-        requires=(
-            "The working set already contains only exact Simplified-compatible pairs",
-            "Exactly one remaining pair for the source form has complete strict numbered preserve-case Pinyin-list equality",
-        ),
-        selected_pair="the unique complete strict numbered preserve-case Pinyin-list exact pair",
-        handler=match_strict_pinyin_exact_unique_pairs,
+    selected_pair="the unique complete strict numbered preserve-case Pinyin-list exact pair",
+    handler=match_strict_pinyin_exact_unique_pairs,
+)
+MANUAL_PINYIN_OVERRIDE_UNIQUE_RULE = MatchingRuleDefinition(
+    name="manual_pinyin_override_unique",
+    scope="pair_pipeline",
+    requires=(
+        "The source form has a configured manual Pinyin correction",
+        "Exactly one remaining pair matches the corrected Pinyin with complete strict numbered preserve-case "
+        "or compact preserve-case Pinyin-list equality",
     ),
-    "manual_pinyin_override_unique": MatchingRuleDefinition(
-        name="manual_pinyin_override_unique",
-        scope="pair_pipeline",
-        requires=(
-            "The source form has a configured manual Pinyin correction",
-            "Exactly one remaining pair matches the corrected Pinyin with complete strict numbered preserve-case "
-            "or compact preserve-case Pinyin-list equality",
-        ),
-        selected_pair="the unique pair targeted by the configured corrected Pinyin value",
-        handler=match_manual_pinyin_override_pairs,
+    selected_pair="the unique pair targeted by the configured corrected Pinyin value",
+    handler=match_manual_pinyin_override_pairs,
+)
+FORMAT_VARIANT_UNIQUE_RULE = MatchingRuleDefinition(
+    name="format_variant_unique",
+    scope="pair_pipeline",
+    requires=(
+        "The working set already contains only exact Simplified-compatible pairs",
+        "Exactly one remaining pair for the source form has complete compact preserve-case Pinyin-list equality",
+        "The strict numbered preserve-case Pinyin reading lists differ only by spacing or separator formatting",
     ),
-    "format_variant_unique": MatchingRuleDefinition(
-        name="format_variant_unique",
-        scope="pair_pipeline",
-        requires=(
-            "The working set already contains only exact Simplified-compatible pairs",
-            "Exactly one remaining pair for the source form has complete compact preserve-case Pinyin-list equality",
-            "The strict numbered preserve-case Pinyin reading lists differ only by spacing or separator formatting",
-        ),
-        selected_pair="the unique complete compact preserve-case Pinyin-list format-variant pair",
-        handler=match_format_variant_unique_pairs,
+    selected_pair="the unique complete compact preserve-case Pinyin-list format-variant pair",
+    handler=match_format_variant_unique_pairs,
+)
+SPOKEN_TONE_VARIANT_UNIQUE_RULE = MatchingRuleDefinition(
+    name="spoken_tone_variant_unique",
+    scope="pair_pipeline",
+    requires=(
+        "The working set already contains only exact Simplified-compatible pairs",
+        "Exactly one remaining pair for the source form has toneless Pinyin equality",
+        "The source and dictionary Pinyin have the same reading count, syllable count, and syllable bases",
+        "Every tone difference is explained by recognized spoken variants: 一 sandhi, 不 sandhi, or neutral tone differences",
     ),
-    "spoken_tone_variant_unique": MatchingRuleDefinition(
-        name="spoken_tone_variant_unique",
-        scope="pair_pipeline",
-        requires=(
-            "The working set already contains only exact Simplified-compatible pairs",
-            "Exactly one remaining pair for the source form has toneless Pinyin equality",
-            "The source and dictionary Pinyin have the same reading count, syllable count, and syllable bases",
-            "Every tone difference is explained by recognized spoken variants: 一 sandhi, 不 sandhi, or neutral tone differences",
-        ),
-        selected_pair="the unique recognized spoken-tone-variant pair",
-        handler=match_spoken_tone_variant_pairs,
+    selected_pair="the unique recognized spoken-tone-variant pair",
+    handler=match_spoken_tone_variant_pairs,
+)
+CASE_VARIANT_EXACT_DEFINITION_UNIQUE_RULE = MatchingRuleDefinition(
+    name="case_variant_exact_definition_unique",
+    scope="pair_pipeline",
+    requires=(
+        "The working set already contains only exact Simplified-compatible pairs",
+        "Exactly one remaining pair for the source form has complete compact lower-case Pinyin-list equality",
+        "The strict numbered preserve-case Pinyin reading lists differ by case after spacing and separator normalization",
+        "The complete non-empty normalized source and dictionary definition sets are identical",
     ),
-    "case_variant_exact_definition_unique": MatchingRuleDefinition(
-        name="case_variant_exact_definition_unique",
-        scope="pair_pipeline",
-        requires=(
-            "The working set already contains only exact Simplified-compatible pairs",
-            "Exactly one remaining pair for the source form has complete compact lower-case Pinyin-list equality",
-            "The strict numbered preserve-case Pinyin reading lists differ by case after spacing and separator normalization",
-            "The complete non-empty normalized source and dictionary definition sets are identical",
-        ),
-        selected_pair="the unique exact-definition case-variant pair",
-        handler=match_case_variant_exact_definition_pairs,
+    selected_pair="the unique exact-definition case-variant pair",
+    handler=match_case_variant_exact_definition_pairs,
+)
+EXACT_DEFINITION_ALSO_PR_UNIQUE_RULE = MatchingRuleDefinition(
+    name="exact_definition_also_pr_unique",
+    scope="pair_pipeline",
+    requires=(
+        "The working set already contains only exact Simplified-compatible pairs",
+        "No higher-priority pair-pipeline step consumed this source form",
+        "Exactly one remaining pair for the source form has complete normalized definition-set equality",
+        "Every source Pinyin reading is either already on the dictionary form or explicitly listed in the "
+        "dictionary definitions as also pr.",
+        "At least one source Pinyin reading is an extra also-pr reading not already on the dictionary form",
     ),
-    "exact_definition_also_pr_unique": MatchingRuleDefinition(
-        name="exact_definition_also_pr_unique",
-        scope="pair_pipeline",
-        requires=(
-            "The working set already contains only exact Simplified-compatible pairs",
-            "No higher-priority pair-pipeline step consumed this source form",
-            "Exactly one remaining pair for the source form has complete normalized definition-set equality",
-            "Every source Pinyin reading is either already on the dictionary form or explicitly listed in the "
-            "dictionary definitions as also pr.",
-            "At least one source Pinyin reading is an extra also-pr reading not already on the dictionary form",
-        ),
-        selected_pair="the unique exact-definition pair whose source Pinyin is fully explained by also-pr readings",
-        handler=match_exact_definition_also_pr_pairs,
+    selected_pair="the unique exact-definition pair whose source Pinyin is fully explained by also-pr readings",
+    handler=match_exact_definition_also_pr_pairs,
+)
+EXACT_DEFINITION_UNIQUE_RULE = MatchingRuleDefinition(
+    name="exact_definition_unique",
+    scope="pair_pipeline",
+    requires=(
+        "The working set already contains only exact Simplified-compatible pairs",
+        "No higher-priority pair-pipeline step consumed this source form",
+        "Exactly one remaining pair for the source form has complete normalized definition-set equality",
     ),
-    "exact_definition_unique": MatchingRuleDefinition(
-        name="exact_definition_unique",
-        scope="pair_pipeline",
-        requires=(
-            "The working set already contains only exact Simplified-compatible pairs",
-            "No higher-priority pair-pipeline step consumed this source form",
-            "Exactly one remaining pair for the source form has complete normalized definition-set equality",
-        ),
-        selected_pair="the unique exact-definition pair",
-        handler=match_exact_definition_pairs,
+    selected_pair="the unique exact-definition pair",
+    handler=match_exact_definition_pairs,
+)
+SEMICOLON_SPLIT_EXACT_DEFINITION_ALSO_PR_UNIQUE_RULE = MatchingRuleDefinition(
+    name="semicolon_split_exact_definition_also_pr_unique",
+    scope="pair_pipeline",
+    requires=(
+        "The working set already contains only exact Simplified-compatible pairs",
+        "No higher-priority pair-pipeline step consumed this source form",
+        "Exactly one remaining pair for the source form has complete normalized definition-set equality after "
+        "rule-local semicolon splitting",
+        "Every source Pinyin reading is either already on the dictionary form or explicitly listed in the "
+        "dictionary definitions as also pr.",
+        "At least one source Pinyin reading is an extra also-pr reading not already on the dictionary form",
     ),
-    "semicolon_split_exact_definition_also_pr_unique": MatchingRuleDefinition(
-        name="semicolon_split_exact_definition_also_pr_unique",
-        scope="pair_pipeline",
-        requires=(
-            "The working set already contains only exact Simplified-compatible pairs",
-            "No higher-priority pair-pipeline step consumed this source form",
-            "Exactly one remaining pair for the source form has complete normalized definition-set equality after "
-            "rule-local semicolon splitting",
-            "Every source Pinyin reading is either already on the dictionary form or explicitly listed in the "
-            "dictionary definitions as also pr.",
-            "At least one source Pinyin reading is an extra also-pr reading not already on the dictionary form",
-        ),
-        selected_pair=(
-            "the unique semicolon-split exact-definition pair whose source Pinyin is fully explained by also-pr "
-            "readings"
-        ),
-        handler=match_semicolon_split_exact_definition_also_pr_pairs,
+    selected_pair=(
+        "the unique semicolon-split exact-definition pair whose source Pinyin is fully explained by also-pr "
+        "readings"
     ),
-    "html_subform_definition_cover_unique": MatchingRuleDefinition(
-        name="html_subform_definition_cover_unique",
-        scope="pair_pipeline",
-        requires=(
-            "No higher-priority pair-pipeline step consumed this source form",
-            "The xiehanzi HTML contains one or more Pinyin/definition subentries",
-            "Each HTML subentry has exactly one strict numbered preserve-case Pinyin dictionary candidate whose "
-            "normalized definition set matches after rule-local semicolon splitting",
-            "The matched subentries cover every remaining dictionary candidate for the source form exactly once",
-        ),
-        selected_pair="all pairs in the source form whose dictionary forms are covered by xiehanzi HTML subentries",
-        handler=match_html_subform_definition_cover_pairs,
+    handler=match_semicolon_split_exact_definition_also_pr_pairs,
+)
+HTML_SUBFORM_DEFINITION_COVER_UNIQUE_RULE = MatchingRuleDefinition(
+    name="html_subform_definition_cover_unique",
+    scope="pair_pipeline",
+    requires=(
+        "No higher-priority pair-pipeline step consumed this source form",
+        "The xiehanzi HTML contains one or more Pinyin/definition subentries",
+        "Each HTML subentry has exactly one strict numbered preserve-case Pinyin dictionary candidate whose "
+        "normalized definition set matches after rule-local semicolon splitting",
+        "The matched subentries cover every remaining dictionary candidate for the source form exactly once",
     ),
-    "default_unresolved": MatchingRuleDefinition(
-        name="default_unresolved",
-        scope="terminal",
-        requires=("No higher-priority pair-pipeline step consumed this source form",),
-        handler=match_default_unresolved_pairs,
-    ),
-}
-
+    selected_pair="all pairs in the source form whose dictionary forms are covered by xiehanzi HTML subentries",
+    handler=match_html_subform_definition_cover_pairs,
+)
+DEFAULT_UNRESOLVED_RULE = MatchingRuleDefinition(
+    name="default_unresolved",
+    scope="terminal",
+    requires=("No higher-priority pair-pipeline step consumed this source form",),
+    handler=match_default_unresolved_pairs,
+)
 
 def candidate_count_buckets_for_source_forms(
     entry_reports_by_id: dict[int, dict[str, Any]],
