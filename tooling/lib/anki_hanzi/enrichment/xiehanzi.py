@@ -81,6 +81,18 @@ BUCKET_DESCRIPTIONS = {
         "is resolved by applying tags and metadata to the selected dictionary form without changing dictionary Pinyin "
         "or definitions."
     ),
+    "exact_definition_also_pr": (
+        "A source form has exactly one remaining dictionary candidate whose complete normalized definition set "
+        "matches exactly. Every source Pinyin reading is either already on the dictionary form or explicitly listed "
+        "in the dictionary definitions as also pr., and at least one source reading is such an extra also-pr reading. "
+        "The source form is resolved by applying tags and metadata directly and adding the explicitly attested "
+        "also-pr readings to the selected dictionary form."
+    ),
+    "exact_definition": (
+        "A source form has exactly one remaining dictionary candidate whose complete normalized definition set "
+        "matches exactly. The source form is resolved by applying tags and metadata directly to the selected "
+        "dictionary form without changing dictionary Pinyin or definitions."
+    ),
     "missing_dictionary_word": (
         "No exact Simplified word exists in CC-CEDICT. The source form is resolved by creating synthetic words/forms "
         "from the xiehanzi source entry."
@@ -169,6 +181,24 @@ BUCKET_DEFINITIONS = {
         report_items=False,
         matching_rules=("case_variant_exact_definition_unique",),
         consumption_rule="drop_case_variant_exact_definition_source_form_pairs",
+    ),
+    "exact_definition_also_pr": BucketDefinition(
+        name="exact_definition_also_pr",
+        priority=65,
+        phase="pair_pipeline",
+        description=BUCKET_DESCRIPTIONS["exact_definition_also_pr"],
+        report_items=False,
+        matching_rules=("exact_definition_also_pr_unique",),
+        consumption_rule="drop_exact_definition_also_pr_source_form_pairs",
+    ),
+    "exact_definition": BucketDefinition(
+        name="exact_definition",
+        priority=70,
+        phase="pair_pipeline",
+        description=BUCKET_DESCRIPTIONS["exact_definition"],
+        report_items=False,
+        matching_rules=("exact_definition_unique",),
+        consumption_rule="drop_exact_definition_source_form_pairs",
     ),
     "default_unresolved": BucketDefinition(
         name="default_unresolved",
@@ -635,7 +665,7 @@ def build_matching_report(
         if context.get("candidate_count_for_source") is not None:
             report["candidate"] = f"{context.get('candidate_index_for_source')}/{context['candidate_count_for_source']}"
 
-        for extra_key in ("manual_pinyin_override", "spoken_tone_variant"):
+        for extra_key in ("manual_pinyin_override", "spoken_tone_variant", "exact_definition_also_pr"):
             if extra_key in context:
                 report[extra_key] = context[extra_key]
 
@@ -856,6 +886,8 @@ def enrich_state(
         "hanzi_form_case_variant_matches": form_stats["match_types"]["case_variant"],
         "hanzi_form_reading_variant_matches": form_stats["match_types"]["reading_variant"],
         "hanzi_form_spoken_tone_variant_matches": form_stats["match_types"]["spoken_tone_variant"],
+        "hanzi_form_exact_definition_matches": form_stats["match_types"]["exact_definition"],
+        "hanzi_form_exact_definition_also_pr_matches": form_stats["match_types"]["exact_definition_also_pr"],
         "hanzi_form_pinyin_variant_matches": form_stats["matched_pinyin_variant"],
         "hanzi_form_toneless_matches": form_stats["matched_toneless"],
         "hanzi_form_stubs_created": form_stats["created"],
@@ -908,6 +940,16 @@ def enrich_state(
                 for key, value in pipeline_enrichment["case_variant_exact_definition"].items()
                 if key not in {"entries", "form_stats"}
             },
+            "exact_definition_also_pr": {
+                key: value
+                for key, value in pipeline_enrichment["exact_definition_also_pr"].items()
+                if key not in {"added_readings", "entries", "form_stats"}
+            },
+            "exact_definition": {
+                key: value
+                for key, value in pipeline_enrichment["exact_definition"].items()
+                if key not in {"entries", "form_stats"}
+            },
             "default_unresolved": pipeline_enrichment["default_unresolved"],
         },
         "frequency_enrichment": frequency_enrichment,
@@ -919,6 +961,11 @@ def enrich_state(
             "perfect_match_entries": pipeline_enrichment["perfect_match"]["entries"][:25],
             "manual_pinyin_override_entries": pipeline_enrichment["manual_pinyin_override"]["entries"][:25],
             "format_variant_unique_entries": pipeline_enrichment["format_variant_unique"]["entries"][:25],
+            "exact_definition_also_pr_added_readings": pipeline_enrichment["exact_definition_also_pr"][
+                "added_readings"
+            ][:25],
+            "exact_definition_also_pr_entries": pipeline_enrichment["exact_definition_also_pr"]["entries"][:25],
+            "exact_definition_entries": pipeline_enrichment["exact_definition"]["entries"][:25],
             "default_fallback_entries": pipeline_enrichment["default_fallback_entries"][:25],
             "hanzi_form_stubs": form_stats["created_entries"],
             "hanzi_non_exact_definition_mismatches": form_stats["non_exact_definition_mismatches"],

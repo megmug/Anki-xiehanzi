@@ -447,6 +447,8 @@ def new_form_stats() -> dict[str, Any]:
             "case_variant": 0,
             "reading_variant": 0,
             "spoken_tone_variant": 0,
+            "exact_definition": 0,
+            "exact_definition_also_pr": 0,
             "toneless": 0,
             "created": 0,
         },
@@ -544,6 +546,20 @@ def drop_case_variant_exact_definition_source_form_pairs(
     return drop_source_form_pairs(selected_items, remaining_items)
 
 
+def drop_exact_definition_also_pr_source_form_pairs(
+    selected_items: list[dict[str, Any]],
+    remaining_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return drop_source_form_pairs(selected_items, remaining_items)
+
+
+def drop_exact_definition_source_form_pairs(
+    selected_items: list[dict[str, Any]],
+    remaining_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return drop_source_form_pairs(selected_items, remaining_items)
+
+
 def apply_legacy_enrichment_fallback_pairs(
     selected_items: list[dict[str, Any]],
     remaining_items: list[dict[str, Any]],
@@ -595,6 +611,18 @@ CONSUMPTION_RULES = {
         report_only_effect="remove all remaining matching pairs for the exact-definition case-variant source form",
         enrichment_effect="apply tags and metadata directly to the selected dictionary form without changing Pinyin",
         handler=drop_case_variant_exact_definition_source_form_pairs,
+    ),
+    "drop_exact_definition_also_pr_source_form_pairs": ConsumptionRuleDefinition(
+        name="drop_exact_definition_also_pr_source_form_pairs",
+        report_only_effect="remove all remaining matching pairs for the exact-definition also-pr source form",
+        enrichment_effect="apply tags and metadata directly and add explicitly attested also-pr readings",
+        handler=drop_exact_definition_also_pr_source_form_pairs,
+    ),
+    "drop_exact_definition_source_form_pairs": ConsumptionRuleDefinition(
+        name="drop_exact_definition_source_form_pairs",
+        report_only_effect="remove all remaining matching pairs for the exact-definition source form",
+        enrichment_effect="apply tags and metadata directly to the selected dictionary form without changing Pinyin",
+        handler=drop_exact_definition_source_form_pairs,
     ),
     "apply_legacy_enrichment_fallback": ConsumptionRuleDefinition(
         name="apply_legacy_enrichment_fallback",
@@ -987,6 +1015,132 @@ def consume_case_variant_exact_definition_bucket(
     }
 
 
+def consume_exact_definition_bucket(
+    state: LexiconState,
+    deck_entries: list[dict[str, Any]],
+    pipeline: dict[str, Any],
+    form_stats: dict[str, Any],
+) -> dict[str, Any]:
+    selected_items = pipeline["bucket_results"]["exact_definition"]["selected_items"]
+    consumed_entries: list[dict[str, Any]] = []
+
+    for item in sorted(selected_items, key=pair_source_form_id):
+        word, form, _, _ = target_word_and_form_from_pair(state, item)
+        entry = deck_entry_for_pair(deck_entries, item)
+        if not definition_sets_exact(definitions_from_meaning_html(entry["meaning_html"]), list(form.definitions)):
+            raise ValueError(f"Exact-definition bucket selected a non-exact-definition pair: {item!r}")
+        apply_entry_metadata_to_selected_form(word, form, entry)
+        form_stats["matched"] += 1
+        record_form_match(form_stats, "exact_definition")
+        consumed_entries.append(entry)
+
+    return {
+        "entries": [entry_summary(entry) for entry in consumed_entries],
+        "entry_count": len(consumed_entries),
+        "missing_deck_after_pipeline": [],
+        "form_stats": form_stats,
+        "state_effect": "applied exact-definition tags and metadata directly without changing dictionary Pinyin",
+    }
+
+
+def compact_lower_pinyin_key_from_record(record: dict[str, Any]) -> str:
+    return str(record.get("compact_lower") or "")
+
+
+def matching_also_pr_reading_values(item: dict[str, Any]) -> list[str]:
+    exact_definition_also_pr = item["context"].get("exact_definition_also_pr")
+    if not exact_definition_also_pr:
+        raise ValueError(f"Exact-definition also-pr bucket lacks also-pr context: {item!r}")
+
+    extra_keys = {
+        compact_lower_pinyin_key_from_record(record)
+        for record in exact_definition_also_pr.get("extra_source_readings", [])
+    }
+    also_pr_by_key = {
+        compact_lower_pinyin_key_from_record(record): str(record.get("strict") or "")
+        for record in exact_definition_also_pr.get("also_pr_readings", [])
+    }
+
+    readings: list[str] = []
+    for key in sorted(extra_keys):
+        reading = also_pr_by_key.get(key)
+        if reading and reading not in readings:
+            readings.append(reading)
+    if not readings:
+        raise ValueError(f"Exact-definition also-pr bucket has no addable extra readings: {item!r}")
+    return readings
+
+
+def pinyin_reading_in_reference_spacing(reading: str, reference_pinyin: str) -> str:
+    source_tokens = numbered_pinyin_tokens(reading)
+    if not source_tokens:
+        return numbered_pinyin_part(reading)
+
+    for reference_part in re.split(r"/", str(reference_pinyin or "")):
+        reference_tokens = numbered_pinyin_tokens(reference_part)
+        if len(reference_tokens) != len(source_tokens):
+            continue
+        try:
+            return " ".join(
+                source_tone_on_reference_base(source_token, reference_token)
+                for source_token, reference_token in zip(source_tokens, reference_tokens)
+            )
+        except ValueError:
+            return " ".join(source_tokens)
+
+    return " ".join(source_tokens)
+
+
+def consume_exact_definition_also_pr_bucket(
+    state: LexiconState,
+    deck_entries: list[dict[str, Any]],
+    pipeline: dict[str, Any],
+    form_stats: dict[str, Any],
+) -> dict[str, Any]:
+    selected_items = pipeline["bucket_results"]["exact_definition_also_pr"]["selected_items"]
+    consumed_entries: list[dict[str, Any]] = []
+    added_readings: list[dict[str, Any]] = []
+
+    for item in sorted(selected_items, key=pair_source_form_id):
+        word, form, _, _ = target_word_and_form_from_pair(state, item)
+        entry = deck_entry_for_pair(deck_entries, item)
+        if not definition_sets_exact(definitions_from_meaning_html(entry["meaning_html"]), list(form.definitions)):
+            raise ValueError(f"Exact-definition also-pr bucket selected a non-exact-definition pair: {item!r}")
+
+        apply_entry_metadata_to_selected_form(word, form, entry)
+        old_readings = list(form.pinyin_readings)
+        requested_readings = [
+            pinyin_reading_in_reference_spacing(reading, item["dictionary"]["pinyin"])
+            for reading in matching_also_pr_reading_values(item)
+        ]
+        added = form.add_pinyin_readings(" / ".join(requested_readings))
+        word.sort_forms_by_pinyin()
+        form_stats["matched"] += 1
+        record_form_match(form_stats, "exact_definition_also_pr")
+
+        added_readings.append(
+            {
+                "entry": entry_summary(entry),
+                "target": item["target"],
+                "dictionary_primary_pinyin": form.pinyin,
+                "requested_pinyin_readings": requested_readings,
+                "old_pinyin_readings": old_readings,
+                "added_pinyin_readings": added,
+                "new_pinyin_readings": list(form.pinyin_readings),
+            }
+        )
+        consumed_entries.append(entry)
+
+    return {
+        "entries": [entry_summary(entry) for entry in consumed_entries],
+        "entry_count": len(consumed_entries),
+        "added_readings": added_readings,
+        "missing_deck_after_pipeline": [],
+        "form_stats": form_stats,
+        "state_effect": "applied exact-definition tags and metadata and added explicitly attested also-pr readings",
+    }
+
+
 def consume_missing_dictionary_word_bucket(
     state: LexiconState,
     deck_entries: list[dict[str, Any]],
@@ -1065,6 +1219,18 @@ STATE_CONSUMPTION_RULES = {
         state_effect="apply case-variant tags and metadata directly without changing dictionary Pinyin",
         handler=consume_case_variant_exact_definition_bucket,
     ),
+    "exact_definition_also_pr": StateConsumptionRuleDefinition(
+        name="consume_exact_definition_also_pr_bucket",
+        bucket="exact_definition_also_pr",
+        state_effect="apply exact-definition tags and metadata and add explicitly attested also-pr readings",
+        handler=consume_exact_definition_also_pr_bucket,
+    ),
+    "exact_definition": StateConsumptionRuleDefinition(
+        name="consume_exact_definition_bucket",
+        bucket="exact_definition",
+        state_effect="apply exact-definition tags and metadata directly without changing dictionary Pinyin",
+        handler=consume_exact_definition_bucket,
+    ),
     "default_unresolved": StateConsumptionRuleDefinition(
         name="consume_default_unresolved_bucket",
         bucket="default_unresolved",
@@ -1125,6 +1291,22 @@ def apply_pipeline_enrichment_to_state(
     )
     form_stats = case_variant_exact_definition["form_stats"]
 
+    exact_definition_also_pr = STATE_CONSUMPTION_RULES["exact_definition_also_pr"].handler(
+        state=state,
+        deck_entries=deck_entries,
+        pipeline=pipeline,
+        form_stats=form_stats,
+    )
+    form_stats = exact_definition_also_pr["form_stats"]
+
+    exact_definition = STATE_CONSUMPTION_RULES["exact_definition"].handler(
+        state=state,
+        deck_entries=deck_entries,
+        pipeline=pipeline,
+        form_stats=form_stats,
+    )
+    form_stats = exact_definition["form_stats"]
+
     default_unresolved = STATE_CONSUMPTION_RULES["default_unresolved"].handler(
         state,
         deck_entries,
@@ -1144,6 +1326,8 @@ def apply_pipeline_enrichment_to_state(
         "format_variant_unique": format_variant_stats,
         "spoken_tone_variant": spoken_tone_variant,
         "case_variant_exact_definition": case_variant_exact_definition,
+        "exact_definition_also_pr": exact_definition_also_pr,
+        "exact_definition": exact_definition,
         "default_unresolved": {
             key: value for key, value in default_unresolved.items() if key not in {"entries", "form_stats"}
         },

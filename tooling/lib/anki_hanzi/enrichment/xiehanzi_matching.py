@@ -22,6 +22,7 @@ from anki_hanzi.enrichment.xiehanzi_consumption import bucket_source_form_ids, p
 RuleHandler = Callable[..., dict[str, Any]]
 
 PINYIN_NUMBERED_TOKEN_RE = re.compile(r"[A-Za-züÜv:]+[1-5]?")
+ALSO_PR_RE = re.compile(r"also\s+pr\.\s*\[([^\]]+)\]", re.IGNORECASE)
 MANUAL_PINYIN_OVERRIDES = {
     ("标致", "7-9"): {
         "pinyin": "biao1zhi5",
@@ -296,6 +297,80 @@ def matching_pair_with_spoken_tone_variant(
     return pair
 
 
+def unique_pinyin_reading_records(value: str) -> list[dict[str, str]]:
+    readings: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for reading in pinyin_readings(value):
+        if reading.compact_lower in seen:
+            continue
+        readings.append(
+            {
+                "strict": reading.strict,
+                "compact_lower": reading.compact_lower,
+            }
+        )
+        seen.add(reading.compact_lower)
+    return readings
+
+
+def also_pr_definition_readings(definitions: list[str]) -> list[dict[str, str]]:
+    readings: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for definition in definitions:
+        for value in ALSO_PR_RE.findall(definition or ""):
+            for reading in unique_pinyin_reading_records(value):
+                key = reading["compact_lower"]
+                if key in seen:
+                    continue
+                readings.append(reading)
+                seen.add(key)
+    return readings
+
+
+def exact_definition_also_pr_context(pair: dict[str, Any]) -> dict[str, Any] | None:
+    if not pair_definition_sets_exact(pair):
+        return None
+
+    source_readings = unique_pinyin_reading_records(pair["source"]["pinyin"])
+    dictionary_readings = unique_pinyin_reading_records(pair["dictionary"]["pinyin"])
+    also_pr_readings = also_pr_definition_readings(list(pair["dictionary"].get("definitions", [])))
+    source_keys = {reading["compact_lower"] for reading in source_readings}
+    dictionary_keys = {reading["compact_lower"] for reading in dictionary_readings}
+    also_pr_keys = {reading["compact_lower"] for reading in also_pr_readings}
+    extra_source_readings = [
+        reading
+        for reading in source_readings
+        if reading["compact_lower"] in also_pr_keys and reading["compact_lower"] not in dictionary_keys
+    ]
+
+    if not source_keys or not extra_source_readings:
+        return None
+    if not source_keys <= dictionary_keys | also_pr_keys:
+        return None
+
+    return {
+        "source_readings": source_readings,
+        "dictionary_readings": dictionary_readings,
+        "also_pr_readings": also_pr_readings,
+        "extra_source_readings": extra_source_readings,
+    }
+
+
+def matching_pair_with_exact_definition_also_pr(
+    item: dict[str, Any],
+    also_pr_context: dict[str, Any],
+    *,
+    bucket: str,
+    matching_rule: str,
+) -> dict[str, Any]:
+    pair = matching_pair_for_bucket(item, bucket=bucket, matching_rule=matching_rule)
+    pair["context"] = {
+        **pair["context"],
+        "exact_definition_also_pr": also_pr_context,
+    }
+    return pair
+
+
 def pair_pinyin_kind(pair: dict[str, Any]) -> str:
     return classify_pinyin(pair["source"]["pinyin"], pair["dictionary"]["pinyin"])
 
@@ -532,6 +607,90 @@ def match_case_variant_exact_definition_pairs(
     }
 
 
+def match_exact_definition_also_pr_pairs(
+    working_pairs: list[dict[str, Any]],
+    bucket: str,
+    matching_rule: str,
+) -> dict[str, Any]:
+    pairs_by_source_form: dict[int, list[dict[str, Any]]] = {}
+    for pair in working_pairs:
+        pairs_by_source_form.setdefault(pair_source_form_id(pair), []).append(pair)
+
+    selected_pair_ids: set[tuple[int, int]] = set()
+    context_by_pair_id: dict[tuple[int, int], dict[str, Any]] = {}
+    for source_pairs in pairs_by_source_form.values():
+        matching_pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for pair in source_pairs:
+            also_pr_context = exact_definition_also_pr_context(pair)
+            if also_pr_context is not None:
+                matching_pairs.append((pair, also_pr_context))
+
+        if len(matching_pairs) != 1:
+            continue
+
+        pair, also_pr_context = matching_pairs[0]
+        pair_id = matching_pair_identity(pair)
+        if pair_id is not None:
+            selected_pair_ids.add(pair_id)
+            context_by_pair_id[pair_id] = also_pr_context
+
+    selected_items: list[dict[str, Any]] = []
+    remaining_items: list[dict[str, Any]] = []
+    for pair in working_pairs:
+        pair_id = matching_pair_identity(pair)
+        if pair_id in selected_pair_ids:
+            selected_items.append(
+                matching_pair_with_exact_definition_also_pr(
+                    pair,
+                    context_by_pair_id[pair_id],
+                    bucket=bucket,
+                    matching_rule=matching_rule,
+                )
+            )
+        else:
+            remaining_items.append(pair)
+
+    return {
+        "selected_items": selected_items,
+        "remaining_items": remaining_items,
+        "selected_source_form_ids": bucket_source_form_ids(selected_items),
+    }
+
+
+def match_exact_definition_pairs(
+    working_pairs: list[dict[str, Any]],
+    bucket: str,
+    matching_rule: str,
+) -> dict[str, Any]:
+    pairs_by_source_form: dict[int, list[dict[str, Any]]] = {}
+    for pair in working_pairs:
+        pairs_by_source_form.setdefault(pair_source_form_id(pair), []).append(pair)
+
+    selected_pair_ids: set[tuple[int, int]] = set()
+    for source_pairs in pairs_by_source_form.values():
+        matching_pairs = [pair for pair in source_pairs if pair_definition_sets_exact(pair)]
+        if len(matching_pairs) != 1:
+            continue
+        pair_id = matching_pair_identity(matching_pairs[0])
+        if pair_id is not None:
+            selected_pair_ids.add(pair_id)
+
+    selected_items: list[dict[str, Any]] = []
+    remaining_items: list[dict[str, Any]] = []
+    for pair in working_pairs:
+        pair_id = matching_pair_identity(pair)
+        if pair_id in selected_pair_ids:
+            selected_items.append(matching_pair_for_bucket(pair, bucket=bucket, matching_rule=matching_rule))
+        else:
+            remaining_items.append(pair)
+
+    return {
+        "selected_items": selected_items,
+        "remaining_items": remaining_items,
+        "selected_source_form_ids": bucket_source_form_ids(selected_items),
+    }
+
+
 def match_unique_pinyin_kind_pairs(
     working_pairs: list[dict[str, Any]],
     *,
@@ -641,6 +800,31 @@ MATCHING_RULES = {
         ),
         selected_pair="the unique exact-definition case-variant pair",
         handler=match_case_variant_exact_definition_pairs,
+    ),
+    "exact_definition_also_pr_unique": MatchingRuleDefinition(
+        name="exact_definition_also_pr_unique",
+        scope="pair_pipeline",
+        requires=(
+            "The working set already contains only exact Simplified-compatible pairs",
+            "No higher-priority pair-pipeline step consumed this source form",
+            "Exactly one remaining pair for the source form has complete normalized definition-set equality",
+            "Every source Pinyin reading is either already on the dictionary form or explicitly listed in the "
+            "dictionary definitions as also pr.",
+            "At least one source Pinyin reading is an extra also-pr reading not already on the dictionary form",
+        ),
+        selected_pair="the unique exact-definition pair whose source Pinyin is fully explained by also-pr readings",
+        handler=match_exact_definition_also_pr_pairs,
+    ),
+    "exact_definition_unique": MatchingRuleDefinition(
+        name="exact_definition_unique",
+        scope="pair_pipeline",
+        requires=(
+            "The working set already contains only exact Simplified-compatible pairs",
+            "No higher-priority pair-pipeline step consumed this source form",
+            "Exactly one remaining pair for the source form has complete normalized definition-set equality",
+        ),
+        selected_pair="the unique exact-definition pair",
+        handler=match_exact_definition_pairs,
     ),
     "default_unresolved": MatchingRuleDefinition(
         name="default_unresolved",
