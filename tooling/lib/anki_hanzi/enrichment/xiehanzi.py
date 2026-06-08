@@ -31,7 +31,12 @@ from anki_hanzi.enrichment.xiehanzi_buckets import (
 from anki_hanzi.enrichment.xiehanzi_consumption import (
     apply_pipeline_enrichment_to_state,
 )
-from anki_hanzi.enrichment.xiehanzi_model import bucket_matching_pair_count, bucket_source_form_ids
+from anki_hanzi.enrichment.xiehanzi_model import (
+    empty_pair_consumption,
+    empty_source_prelude_consumption,
+    pair_pipeline_bucket_result,
+    source_prelude_bucket_result,
+)
 from anki_hanzi.enrichment.xiehanzi_source import (
     HANZI_DEDUPE_KEY,
     HANZI_FIELDS,
@@ -93,31 +98,18 @@ def apply_source_prelude_rules(
         consumption = (
             consumption_rule.handler(selected_items, remaining_source_form_ids)
             if consumption_rule is not None
-            else {
-                "consumed_source_form_ids": set(),
-                "consumed_source_form_count": 0,
-                "consumed_matching_pair_count": 0,
-                "remaining_source_form_count": len(remaining_source_form_ids),
-            }
+            else empty_source_prelude_consumption(remaining_source_form_ids)
         )
         for source_form_id in consumption["consumed_source_form_ids"]:
             consumed_by_source_form[source_form_id] = definition.name
 
-        bucket_results[definition.name] = {
-            "phase": definition.phase,
-            "bucket": definition.name,
-            "input_source_form_count": input_source_form_count,
-            "input_matching_pair_count": 0,
-            "selected_items": selected_items,
-            "selected_source_form_count": len(bucket_source_form_ids(selected_items)),
-            "selected_matching_pair_count": 0,
-            "consumed_source_form_count": consumption["consumed_source_form_count"],
-            "consumed_matching_pair_count": consumption["consumed_matching_pair_count"],
-            "removed_from_remaining_matching_pair_count": 0,
-            "remaining_source_form_count_after_consumption": consumption["remaining_source_form_count"],
-            "remaining_matching_pair_count_after_consumption": 0,
-            "items_after_consumption": [],
-        }
+        bucket_results[definition.name] = source_prelude_bucket_result(
+            bucket=definition.name,
+            phase=definition.phase,
+            input_source_form_count=input_source_form_count,
+            selected_items=selected_items,
+            consumption=consumption,
+        )
 
     return {
         "remaining_source_form_ids": remaining_source_form_ids,
@@ -144,33 +136,19 @@ def apply_pair_pipeline_rules(working_pairs: list[dict[str, Any]]) -> dict[str, 
         consumption = (
             consumption_rule.handler(selected_items, remaining_items)
             if consumption_rule is not None
-            else {
-                "consumed_source_form_ids": set(),
-                "consumed_source_form_count": 0,
-                "consumed_matching_pair_count": 0,
-                "removed_from_remaining_matching_pair_count": 0,
-                "remaining_items": remaining_items,
-            }
+            else empty_pair_consumption(remaining_items)
         )
         remaining_items = consumption["remaining_items"]
         for source_form_id in consumption["consumed_source_form_ids"]:
             consumed_by_source_form[source_form_id] = definition.name
 
-        bucket_results[definition.name] = {
-            "phase": definition.phase,
-            "bucket": definition.name,
-            "input_source_form_count": len(bucket_source_form_ids(input_items)),
-            "input_matching_pair_count": bucket_matching_pair_count(input_items),
-            "selected_items": selected_items,
-            "selected_source_form_count": len(bucket_source_form_ids(selected_items)),
-            "selected_matching_pair_count": bucket_matching_pair_count(selected_items),
-            "consumed_source_form_count": consumption["consumed_source_form_count"],
-            "consumed_matching_pair_count": consumption["consumed_matching_pair_count"],
-            "removed_from_remaining_matching_pair_count": consumption["removed_from_remaining_matching_pair_count"],
-            "remaining_source_form_count_after_consumption": len(bucket_source_form_ids(remaining_items)),
-            "remaining_matching_pair_count_after_consumption": bucket_matching_pair_count(remaining_items),
-            "items_after_consumption": [],
-        }
+        bucket_results[definition.name] = pair_pipeline_bucket_result(
+            bucket=definition.name,
+            phase=definition.phase,
+            input_items=input_items,
+            selected_items=selected_items,
+            consumption=consumption,
+        )
 
     for definition in bucket_definitions_by_phase("terminal"):
         input_items = remaining_items
@@ -181,33 +159,20 @@ def apply_pair_pipeline_rules(working_pairs: list[dict[str, Any]]) -> dict[str, 
         consumption = (
             consumption_rule.handler(selected_items, result["remaining_items"])
             if consumption_rule is not None
-            else {
-                "consumed_source_form_ids": set(),
-                "consumed_source_form_count": 0,
-                "consumed_matching_pair_count": 0,
-                "removed_from_remaining_matching_pair_count": 0,
-                "remaining_items": result["remaining_items"],
-            }
+            else empty_pair_consumption(result["remaining_items"])
         )
         remaining_items = consumption["remaining_items"]
         for source_form_id in consumption["consumed_source_form_ids"]:
             consumed_by_source_form[source_form_id] = definition.name
 
-        bucket_results[definition.name] = {
-            "phase": definition.phase,
-            "bucket": definition.name,
-            "input_source_form_count": len(bucket_source_form_ids(input_items)),
-            "input_matching_pair_count": bucket_matching_pair_count(input_items),
-            "selected_items": selected_items,
-            "selected_source_form_count": len(bucket_source_form_ids(selected_items)),
-            "selected_matching_pair_count": bucket_matching_pair_count(selected_items),
-            "consumed_source_form_count": consumption["consumed_source_form_count"],
-            "consumed_matching_pair_count": consumption["consumed_matching_pair_count"],
-            "removed_from_remaining_matching_pair_count": consumption["removed_from_remaining_matching_pair_count"],
-            "remaining_source_form_count_after_consumption": len(bucket_source_form_ids(remaining_items)),
-            "remaining_matching_pair_count_after_consumption": bucket_matching_pair_count(remaining_items),
-            "items_after_consumption": selected_items,
-        }
+        bucket_results[definition.name] = pair_pipeline_bucket_result(
+            bucket=definition.name,
+            phase=definition.phase,
+            input_items=input_items,
+            selected_items=selected_items,
+            consumption=consumption,
+            items_after_consumption=selected_items,
+        )
 
     return {
         "bucket_results": bucket_results,
