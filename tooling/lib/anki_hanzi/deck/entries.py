@@ -7,7 +7,7 @@ from typing import Any
 
 from anki_hanzi.audio.generation import AudioGenerator
 from anki_hanzi.deck import common
-from anki_hanzi.deck.common import DeckSelection
+from anki_hanzi.deck.config import DeckSelection
 from anki_hanzi.lexicon import LexiconForm, LexiconState, LexiconWord
 from anki_hanzi.pinyin import numbered_to_display
 from anki_hanzi.rendering.meaning_html import render_meaning_group, render_meaning_html

@@ -13,8 +13,8 @@ from typing import Any
 import genanki
 
 from anki_hanzi.audio.generation import AudioGenerator
-from anki_hanzi.deck import DeckConfig
 from anki_hanzi.deck import common
+from anki_hanzi.deck.config import DeckConfig, load_deck_config
 from anki_hanzi.deck.entries import (
     EnrichedWordEntry,
     build_entries_from_state,
@@ -235,7 +235,7 @@ def build_package(
     deterministic_zip: bool,
     zip_generated_datetime: tuple[int, int, int, int, int, int] | None,
 ) -> dict[str, Any]:
-    config = common.load_deck_config(deck_config_path)
+    config = load_deck_config(deck_config_path)
     if not config.selection.config_found:
         raise ValueError("deck config file is required but not found")
     audio_generator = AudioGenerator(
