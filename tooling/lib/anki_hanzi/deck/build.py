@@ -7,20 +7,24 @@ import os
 import subprocess
 import tempfile
 import zipfile
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import genanki
 
 from anki_hanzi.audio.generation import AudioGenerator
-from anki_hanzi.deck import DeckConfig, DeckSelection
+from anki_hanzi.deck import DeckConfig
 from anki_hanzi.deck import common
+from anki_hanzi.deck.entries import (
+    EnrichedWordEntry,
+    build_entries_from_state,
+    flatten_entries_by_card_type,
+    unique_audio_entries,
+)
+from anki_hanzi.deck.hanzi_writer import build_hanzi_writer_bundle, is_writable_hanzi
 from anki_hanzi.enrichment import xiehanzi as xiehanzi_enrichment
-from anki_hanzi.lexicon import ENRICHED_LEXICON_SCHEMA, LexiconForm, LexiconState, LexiconWord
+from anki_hanzi.lexicon import ENRICHED_LEXICON_SCHEMA, LexiconState
 from anki_hanzi.lexicon.cc_cedict import load_cedict_state, load_snapshot_manifest, resolve_source_file
-from anki_hanzi.pinyin import numbered_to_display
-from anki_hanzi.rendering.meaning_html import render_meaning_group, render_meaning_html
 
 
 DEFAULT_FREQUENCY_LIST = xiehanzi_enrichment.DEFAULT_FREQUENCY_LIST
@@ -50,70 +54,6 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     )
 
 
-@dataclass(frozen=True)
-class EnrichedWordEntry:
-    simplified: str
-    pinyin: str
-    definition_html: str
-    meaning_definition_html: str
-    audio_filename_primary: str
-    audio_filename_secondary: str
-    note_pinyin: str | None = None
-    tags: tuple[str, ...] = ()
-
-    @property
-    def audio_ref(self) -> str:
-        if not self.audio_filename_primary and not self.audio_filename_secondary:
-            return ""
-        return f"[sound:{self.audio_filename_primary}][sound:{self.audio_filename_secondary}]"
-
-    @property
-    def audio_filenames(self) -> tuple[str, str]:
-        return (self.audio_filename_primary, self.audio_filename_secondary)
-
-    def fields(self, card_type: str, build_id: str) -> list[str]:
-        note_pinyin = self.pinyin if self.note_pinyin is None else self.note_pinyin
-        note_id = common.stable_note_id(card_type, self.simplified, note_pinyin)
-        meaning_html = self.meaning_definition_html if card_type == "Meaning" else self.definition_html
-        return [
-            self.simplified,
-            self.pinyin,
-            meaning_html,
-            self.audio_ref,
-            note_id,
-            build_id,
-        ]
-
-
-@dataclass(frozen=True)
-class MeaningFormEntry:
-    display_pinyin: str
-    form: LexiconForm
-    tags: frozenset[str]
-
-
-def normalize_simplified(value: Any) -> str:
-    return str(value or "").strip()
-
-
-def _is_hanzi_char(char: str) -> bool:
-    code = ord(char)
-    return (0x4E00 <= code <= 0x9FFF) or (0x3400 <= code <= 0x4DBF) or (0x20000 <= code <= 0x2EBEF)
-
-
-def _has_hanzi_writer_data(char: str) -> bool:
-    if not _is_hanzi_char(char):
-        return False
-    data_file = common.HANZI_WRITER_DATA_DIR / f"{char}.json"
-    return data_file.exists()
-
-
-def _is_writable_hanzi(text: str) -> bool:
-    if not text:
-        return False
-    return all(_has_hanzi_writer_data(c) for c in text)
-
-
 def build_decks(
     config: DeckConfig,
     models: dict[str, genanki.Model],
@@ -125,7 +65,7 @@ def build_decks(
     for card_type in config.card_types:
         card_entries = entries_by_card_type.get(card_type, [])
         if card_type == "Write":
-            card_entries = [e for e in card_entries if _is_writable_hanzi(e.simplified)]
+            card_entries = [entry for entry in card_entries if is_writable_hanzi(entry.simplified)]
         decks.append(
             common.create_deck(
                 deck_name=f"{common.DECK_ROOT}::{card_type}",
@@ -151,265 +91,6 @@ def resolve_build_id() -> str:
         ).strip()
     except Exception:
         return "unknown"
-
-
-def build_hanzi_writer_bundle(
-    write_entries: list[EnrichedWordEntry],
-    output_path: Path,
-) -> str:
-    """Build a single JS file with all hanzi-writer data needed by the Write deck.
-
-    Returns the path to the generated file.
-    """
-    unique_chars: set[str] = set()
-    for entry in write_entries:
-        for char in entry.simplified:
-            if _has_hanzi_writer_data(char):
-                unique_chars.add(char)
-
-    data: dict[str, Any] = {}
-    for char in sorted(unique_chars):
-        data_file = common.HANZI_WRITER_DATA_DIR / f"{char}.json"
-        if data_file.exists():
-            data[char] = json.loads(data_file.read_text(encoding="utf-8"))
-
-    bundle_js = "window.hanziWriterData = " + json.dumps(data, ensure_ascii=False) + ";\n"
-    output_path.write_text(bundle_js, encoding="utf-8")
-    return str(output_path)
-
-
-def _resolve_display_pinyin(form: LexiconForm) -> str:
-    return " / ".join(_resolve_display_pinyin_readings(form))
-
-
-def _resolve_display_pinyin_readings(form: LexiconForm) -> list[str]:
-    readings: list[str] = []
-    for reading in form.pinyin_readings or [form.pinyin]:
-        display_pinyin = numbered_to_display(reading).strip()
-        if display_pinyin:
-            readings.append(display_pinyin)
-    return readings
-
-
-def _form_selection_tags(form: LexiconForm) -> set[str]:
-    return set(form.tags)
-
-
-def _is_form_selected(
-    effective_tags: set[str],
-    mode: str,
-    selection_tags: set[str],
-    is_individual: bool,
-) -> bool:
-    if is_individual:
-        return True
-    if mode == "all":
-        return True
-    if mode == "tagged":
-        return bool(effective_tags & selection_tags)
-    return False
-
-
-def _note_tags(tags: set[str]) -> tuple[str, ...]:
-    return tuple(sorted(tags))
-
-
-def _assert_unique_form_display_pinyin(word: LexiconWord, forms: list[LexiconForm]) -> None:
-    seen: dict[str, LexiconForm] = {}
-    for form in forms:
-        for display_pinyin in _resolve_display_pinyin_readings(form):
-            existing = seen.get(display_pinyin)
-            if existing is not None and existing is not form:
-                raise ValueError(
-                    f"Word {word.simplified!r} has multiple forms with overlapping display Pinyin "
-                    f"{display_pinyin!r}: {existing.pinyin_readings!r} and {form.pinyin_readings!r}"
-                )
-            seen[display_pinyin] = form
-
-
-def _selected_meaning_forms(
-    word: LexiconWord,
-    forms: list[LexiconForm],
-    mode: str,
-    selection_tags: set[str],
-    is_individual: bool,
-) -> list[MeaningFormEntry]:
-    selected_forms: list[MeaningFormEntry] = []
-    for form in forms:
-        display_pinyin = _resolve_display_pinyin(form)
-        if not display_pinyin.strip():
-            continue
-
-        effective_tags = _form_selection_tags(form)
-        if _is_form_selected(effective_tags, mode, selection_tags, is_individual):
-            selected_forms.append(
-                MeaningFormEntry(
-                    display_pinyin=display_pinyin,
-                    form=form,
-                    tags=frozenset(effective_tags),
-                )
-            )
-    return selected_forms
-
-
-def _word_tags(word: LexiconWord, forms: list[LexiconForm]) -> set[str]:
-    tags = set(word.tags)
-    for form in forms:
-        tags.update(form.tags)
-    return tags
-
-
-def _selected_word_forms(
-    word: LexiconWord,
-    forms: list[LexiconForm],
-    mode: str,
-    selection_tags: set[str],
-    is_individual: bool,
-) -> list[LexiconForm]:
-    if is_individual or mode == "all":
-        return forms
-
-    if mode != "tagged":
-        return []
-
-    word_tags = set(word.tags)
-    for form in forms:
-        if (word_tags | set(form.tags)) & selection_tags:
-            return forms
-    return []
-
-
-def _display_pinyin_readings(forms: list[LexiconForm]) -> str:
-    readings: list[str] = []
-    seen: set[str] = set()
-    for form in forms:
-        for display_pinyin in _resolve_display_pinyin_readings(form):
-            display_key = display_pinyin.strip()
-            if not display_key or display_key in seen:
-                continue
-            seen.add(display_key)
-            readings.append(display_pinyin)
-    return " / ".join(readings)
-
-
-def _all_entries(entries_by_card_type: dict[str, list[EnrichedWordEntry]]) -> list[EnrichedWordEntry]:
-    entries: list[EnrichedWordEntry] = []
-    for card_type_entries in entries_by_card_type.values():
-        entries.extend(card_type_entries)
-    return entries
-
-
-def _audio_entries(entries: list[EnrichedWordEntry]) -> list[EnrichedWordEntry]:
-    deduped: list[EnrichedWordEntry] = []
-    seen: set[str] = set()
-    for entry in entries:
-        word = entry.simplified.strip()
-        if not word or word in seen:
-            continue
-        seen.add(word)
-        deduped.append(entry)
-    return deduped
-
-
-def build_entries_from_state(
-    state: LexiconState,
-    selection: DeckSelection,
-    audio_generator: AudioGenerator,
-) -> tuple[dict[str, list[EnrichedWordEntry]], dict[str, Any]]:
-    meaning_entries: list[EnrichedWordEntry] = []
-    pinyin_entries: list[EnrichedWordEntry] = []
-    write_entries: list[EnrichedWordEntry] = []
-    matched_individual_simplified: set[str] = set()
-    rendered_meaning_html_used = 0
-    seen_meaning_entry_keys: set[tuple[str, str]] = set()
-    seen_word_level_words: set[str] = set()
-    selection_tags = set(selection.tags)
-
-    for word in state.sorted_words():
-        simplified = normalize_simplified(word.simplified)
-
-        is_individual = simplified in selection.individual_simplified
-        mode = selection.mode
-
-        rendered_definition_html = render_meaning_html(word)
-
-        forms = word.forms_in_order()
-        _assert_unique_form_display_pinyin(word, forms)
-
-        selected_word_forms = _selected_word_forms(
-            word=word,
-            forms=forms,
-            mode=mode,
-            selection_tags=selection_tags,
-            is_individual=is_individual,
-        )
-        display_readings = _display_pinyin_readings(selected_word_forms)
-        if display_readings and simplified not in seen_word_level_words:
-            seen_word_level_words.add(simplified)
-            audio_filename_primary, audio_filename_secondary = audio_generator.filenames_for_text(simplified)
-            word_level_entry = EnrichedWordEntry(
-                simplified=simplified,
-                pinyin=display_readings,
-                definition_html=rendered_definition_html,
-                meaning_definition_html=rendered_definition_html,
-                audio_filename_primary=audio_filename_primary,
-                audio_filename_secondary=audio_filename_secondary,
-                note_pinyin="",
-                tags=_note_tags(_word_tags(word, forms)),
-            )
-            pinyin_entries.append(word_level_entry)
-            write_entries.append(word_level_entry)
-
-        word_entry_count = 0
-        for meaning_form in _selected_meaning_forms(
-            word=word,
-            forms=forms,
-            mode=mode,
-            selection_tags=selection_tags,
-            is_individual=is_individual,
-        ):
-            display_pinyin = meaning_form.display_pinyin
-            entry_key = (simplified, display_pinyin)
-            if entry_key in seen_meaning_entry_keys:
-                continue
-            seen_meaning_entry_keys.add(entry_key)
-
-            if is_individual:
-                matched_individual_simplified.add(simplified)
-
-            audio_filename_primary, audio_filename_secondary = audio_generator.filenames_for_text(simplified)
-            entry = EnrichedWordEntry(
-                simplified=simplified,
-                pinyin=display_pinyin,
-                definition_html=rendered_definition_html,
-                meaning_definition_html=render_meaning_group(word, [meaning_form.form]),
-                audio_filename_primary=audio_filename_primary,
-                audio_filename_secondary=audio_filename_secondary,
-                tags=_note_tags(set(meaning_form.tags)),
-            )
-            meaning_entries.append(entry)
-            word_entry_count += 1
-
-        if word_entry_count:
-            rendered_meaning_html_used += 1
-
-    entries_by_card_type = {
-        "Meaning": sorted(meaning_entries, key=lambda entry: entry.simplified),
-        "Pinyin": sorted(pinyin_entries, key=lambda entry: entry.simplified),
-        "Write": sorted(write_entries, key=lambda entry: entry.simplified),
-    }
-
-    selection_report = {
-        **selection.report(),
-        "entries_by_card_type": {card_type: len(entries) for card_type, entries in entries_by_card_type.items()},
-        "matched_individual_simplified": sorted(matched_individual_simplified),
-        "unmatched_individual_simplified": sorted(selection.individual_simplified - matched_individual_simplified),
-        "meaning_html": {
-            "rendered_from_data": rendered_meaning_html_used,
-        },
-    }
-
-    return entries_by_card_type, selection_report
 
 
 def collect_media(entries: list[EnrichedWordEntry], static_media: list[str]) -> tuple[list[str], list[str]]:
@@ -575,16 +256,16 @@ def build_package(
         config.selection,
         audio_generator,
     )
-    all_entries = _all_entries(entries_by_card_type)
-    audio_entries = _audio_entries(all_entries)
-    audio_jobs = audio_generator.jobs_for_texts(entry.simplified for entry in audio_entries)
+    all_deck_entries = flatten_entries_by_card_type(entries_by_card_type)
+    audio_deck_entries = unique_audio_entries(all_deck_entries)
+    audio_jobs = audio_generator.jobs_for_texts(entry.simplified for entry in audio_deck_entries)
     build_id = resolve_build_id()
 
     static_media = config.static_media()
     audio_result = audio_generator.generate(audio_jobs)
 
     # Build hanzi-writer JS bundle for offline Write deck usage
-    write_entries = [e for e in entries_by_card_type.get("Write", []) if _is_writable_hanzi(e.simplified)]
+    write_entries = [entry for entry in entries_by_card_type.get("Write", []) if is_writable_hanzi(entry.simplified)]
     hw_bundle_path = Path(common.EXTRA_AUDIO_DIR) / "hanzi-writer-data.js"
     hw_bundle_path.parent.mkdir(parents=True, exist_ok=True)
     build_hanzi_writer_bundle(write_entries, hw_bundle_path)
@@ -592,7 +273,7 @@ def build_package(
     models = common.create_models(config, hw_bundle_path if hw_bundle_path.exists() else None)
     decks = build_decks(config, models, entries_by_card_type, build_id)
 
-    media_files, missing_audio = collect_media(audio_entries, static_media)
+    media_files, missing_audio = collect_media(audio_deck_entries, static_media)
 
     package = genanki.Package(decks, media_files=media_files)
     write_package(
@@ -604,7 +285,7 @@ def build_package(
     )
 
     total_cards = sum(len(d.notes) for d in decks)
-    unique_words = {entry.simplified.strip() for entry in all_entries if entry.simplified.strip()}
+    unique_words = {entry.simplified.strip() for entry in all_deck_entries if entry.simplified.strip()}
     report = {
         "output": str(output_apkg),
         "report": str(report_path),
