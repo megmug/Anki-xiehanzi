@@ -8,6 +8,7 @@ import genanki
 
 from anki_hanzi.deck import common
 from anki_hanzi.deck.config import DeckConfig
+from anki_hanzi.deck.identity import stable_id
 from anki_hanzi.deck.templates import read_template, read_text
 
 
@@ -31,7 +32,7 @@ def create_models(config: DeckConfig | None = None, hw_data_bundle: Path | None 
         front_path, back_path = config.template_files(card_type)
         model_name = f"{common.DECK_ROOT}::{card_type}"
         models[card_type] = genanki.Model(
-            model_id=common.stable_id(f"model:{model_name}"),
+            model_id=stable_id(f"model:{model_name}"),
             name=model_name,
             fields=FIELDS,
             templates=[

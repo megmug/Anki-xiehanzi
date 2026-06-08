@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from anki_hanzi.audio.generation import AudioGenerator
-from anki_hanzi.deck import common
 from anki_hanzi.deck.config import DeckSelection
+from anki_hanzi.deck.identity import stable_note_id
 from anki_hanzi.lexicon import LexiconForm, LexiconState, LexiconWord
 from anki_hanzi.pinyin import numbered_to_display
 from anki_hanzi.rendering.meaning_html import render_meaning_group, render_meaning_html
@@ -36,7 +36,7 @@ class EnrichedWordEntry:
 
     def fields(self, card_type: str, build_id: str) -> list[str]:
         note_pinyin = self.pinyin if self.note_pinyin is None else self.note_pinyin
-        note_id = common.stable_note_id(card_type, self.simplified, note_pinyin)
+        note_id = stable_note_id(card_type, self.simplified, note_pinyin)
         meaning_html = self.meaning_definition_html if card_type == "Meaning" else self.definition_html
         return [
             self.simplified,
