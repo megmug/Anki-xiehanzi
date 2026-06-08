@@ -344,7 +344,7 @@ def build_enrichment_summary(
 def build_enrichment_report(
     *,
     input_label: str,
-    output_path: Path,
+    output_path: Path | None,
     enriched: dict[str, Any],
     matching_report: dict[str, Any],
     pipeline_enrichment: dict[str, Any],
@@ -358,7 +358,7 @@ def build_enrichment_report(
     return {
         "schema": "hanzi-enrichment-report-v1",
         "input": input_label,
-        "output": str(output_path),
+        "output": str(output_path) if output_path is not None else None,
         "summary": enriched["summary"],
         "matching_summary": matching_report["summary"],
         "pipeline_enrichment": {

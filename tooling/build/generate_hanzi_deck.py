@@ -13,12 +13,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 from anki_hanzi.deck import common
 from anki_hanzi.deck.build import (
     DEFAULT_DECK_CONFIG,
-    DEFAULT_ENRICHED_DB_OUTPUT,
     DEFAULT_FREQUENCY_LIST,
     DEFAULT_GENERATED_ZIP_DATETIME,
     DEFAULT_GENANKI_TIMESTAMP,
     DEFAULT_HSK_DATA_DIR,
-    DEFAULT_MASTER_DB,
     DEFAULT_REPORT_PATH,
     DEFAULT_SNAPSHOT_MANIFEST,
     build_package,
@@ -45,14 +43,12 @@ def parse_args() -> argparse.Namespace:
         help="Snapshot manifest with the pinned CC-CEDICT source filename, SHA256, and source URL.",
     )
     parser.add_argument("--source-file", type=Path, default=None, help="Optional pinned CC-CEDICT text file override.")
-    parser.add_argument(
-        "--master-db-output", type=Path, default=DEFAULT_MASTER_DB, help="Diagnostic master JSON output."
-    )
+    parser.add_argument("--master-db-output", type=Path, default=None, help="Optional diagnostic master JSON output.")
     parser.add_argument(
         "--enriched-db-output",
         type=Path,
-        default=DEFAULT_ENRICHED_DB_OUTPUT,
-        help="Diagnostic enriched JSON output.",
+        default=None,
+        help="Optional diagnostic enriched JSON output.",
     )
     parser.add_argument(
         "--hsk-data-dir", type=Path, default=DEFAULT_HSK_DATA_DIR, help="Prepared hanzi HSK TSV directory."

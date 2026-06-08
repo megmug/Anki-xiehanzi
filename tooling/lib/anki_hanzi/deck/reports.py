@@ -17,8 +17,8 @@ from anki_hanzi.deck.templates import read_hanzi_writer_package_version
 class DeckBuildReportInput:
     output_apkg: Path
     report_path: Path
-    master_db_output: Path
-    enriched_db_output: Path
+    master_db_output: Path | None
+    enriched_db_output: Path | None
     source_database_report: dict[str, Any]
     enriched_lexicon: dict[str, Any]
     enrichment_report: dict[str, Any]
@@ -72,6 +72,17 @@ def build_deck_report(data: DeckBuildReportInput) -> dict[str, Any]:
     entries_by_card_type = {card_type: len(entries) for card_type, entries in data.entries_by_card_type.items()}
     total_words = _unique_word_count(data.all_entries)
     audio_files_packaged = len(data.media_files) - len(data.static_media)
+    diagnostic_databases = {}
+    if data.master_db_output is not None:
+        diagnostic_databases["master"] = str(data.master_db_output)
+    if data.enriched_db_output is not None:
+        diagnostic_databases["enriched"] = str(data.enriched_db_output)
+    artifacts = {
+        "apkg": str(data.output_apkg),
+        "build_report": str(data.report_path),
+    }
+    if diagnostic_databases:
+        artifacts["diagnostic_databases"] = diagnostic_databases
 
     return {
         "schema": "hanzi-build-report-v2",
@@ -91,21 +102,14 @@ def build_deck_report(data: DeckBuildReportInput) -> dict[str, Any]:
             "failed_audio_generation_count": len(data.audio_result.failed),
             "missing_audio_files_count": len(data.missing_audio_files),
         },
-        "artifacts": {
-            "apkg": str(data.output_apkg),
-            "build_report": str(data.report_path),
-            "diagnostic_databases": {
-                "master": str(data.master_db_output),
-                "enriched": str(data.enriched_db_output),
-            },
-        },
+        "artifacts": artifacts,
         "stages": {
             "source_database": data.source_database_report,
             "xiehanzi_enrichment": {
                 "schema": data.enrichment_report["schema"],
                 "enriched_lexicon_schema": data.enriched_lexicon.get("schema"),
                 "input": data.enrichment_report["input"],
-                "output": data.enrichment_report["output"],
+                "output": data.enrichment_report.get("output"),
                 "summary": enrichment_summary,
                 "matching": {
                     "schema": data.matching_report["schema"],

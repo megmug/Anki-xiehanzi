@@ -64,8 +64,6 @@ from anki_hanzi.enrichment.xiehanzi.reports import (
 from anki_hanzi.json_io import write_json
 
 
-DEFAULT_MASTER_DB = Path("master_db_output/cc_cedict_master.json")
-DEFAULT_OUTPUT = Path("master_db_output/cc_cedict_hanzi_enriched.json")
 DEFAULT_DECK_INPUTS_DIR = Path("deck_inputs")
 DEFAULT_HSK_DATA_DIR = DEFAULT_DECK_INPUTS_DIR / "hsk-3.0-words-list/New HSK (2025)/Anki xiehanzi"
 
@@ -250,7 +248,7 @@ def build_matching_pipeline(
 def enrich_state(
     master_state: LexiconState,
     input_label: str,
-    output_path: Path,
+    output_path: Path | None,
     hsk_data_dir: Path,
     frequency_list_path: Path,
 ) -> XiehanziEnrichmentResult:
@@ -326,7 +324,8 @@ def enrich_state(
         dropped_duplicates=dropped_duplicates,
     )
 
-    write_json(output_path, enriched)
+    if output_path is not None:
+        write_json(output_path, enriched)
     return XiehanziEnrichmentResult(
         enriched=enriched,
         enrichment_report=report,

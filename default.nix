@@ -3,6 +3,7 @@
   cudaTorchVersion ? "2.12.0",
   cudaTorchIndexUrl ? "https://download.pytorch.org/whl/cu130",
   buildId ? null,
+  writeDiagnosticDatabases ? false,
   pkgs ? import (builtins.fetchGit {
     url = "https://github.com/nixos/nixpkgs/";
     ref = "nixos-26.05";
@@ -390,9 +391,18 @@ let
             # files materialized in this store build.
             find . -type f -exec touch -t 202605200639.48 {} +
 
+            diagnosticDatabaseArgs=()
+            if [ "${if writeDiagnosticDatabases then "1" else "0"}" = "1" ]; then
+              diagnosticDatabaseArgs+=(
+                --master-db-output master_db_output/cc_cedict_master.json
+                --enriched-db-output master_db_output/cc_cedict_hanzi_enriched.json
+              )
+            fi
+
             python tooling/build/generate_hanzi_deck.py \
               --timestamp 1779251987.6 \
-              --zip-generated-datetime 2026-05-20T06:39:48
+              --zip-generated-datetime 2026-05-20T06:39:48 \
+              "''${diagnosticDatabaseArgs[@]}"
 
             runHook postBuild
     '';
@@ -403,6 +413,10 @@ let
       mkdir -p "$out"
       cp "anki-hanzi.apkg" "$out/anki-hanzi-${resolvedBuildId}.apkg"
       cp build_reports/build_report.json "$out/"
+      if [ -d master_db_output ]; then
+        mkdir -p "$out/diagnostics"
+        find master_db_output -maxdepth 1 -type f -name '*.json' -exec cp {} "$out/diagnostics/" \;
+      fi
       find tooling/utilities -maxdepth 1 -type f -name 'migrate-*.py' -exec cp {} "$out/" \;
 
       runHook postInstall

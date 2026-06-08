@@ -32,8 +32,6 @@ from anki_hanzi.lexicon.cc_cedict import load_cedict_state, load_snapshot_manife
 
 DEFAULT_FREQUENCY_LIST = xiehanzi_enrichment.DEFAULT_FREQUENCY_LIST
 DEFAULT_HSK_DATA_DIR = xiehanzi_enrichment.DEFAULT_HSK_DATA_DIR
-DEFAULT_MASTER_DB = xiehanzi_enrichment.DEFAULT_MASTER_DB
-DEFAULT_ENRICHED_DB_OUTPUT = xiehanzi_enrichment.DEFAULT_OUTPUT
 HANZI_DEDUPE_KEY = xiehanzi_enrichment.HANZI_DEDUPE_KEY
 enrich_state = xiehanzi_enrichment.enrich_state
 
@@ -188,8 +186,8 @@ def write_package(
 def build_enriched_state(
     snapshot_manifest: Path,
     source_file: Path | None,
-    master_db_output: Path,
-    enriched_db_output: Path,
+    master_db_output: Path | None,
+    enriched_db_output: Path | None,
     hsk_data_dir: Path,
     frequency_list: Path,
 ) -> EnrichedStateBuildResult:
@@ -205,11 +203,12 @@ def build_enriched_state(
     )
     state.sort_forms_by_pinyin()
     master_json = state.to_master_json()
-    write_json(master_db_output, master_json)
+    if master_db_output is not None:
+        write_json(master_db_output, master_json)
 
     enrichment_result = enrich_state(
         master_state=state,
-        input_label=str(master_db_output),
+        input_label=str(master_db_output) if master_db_output is not None else "in-memory cc-cedict master state",
         output_path=enriched_db_output,
         hsk_data_dir=hsk_data_dir,
         frequency_list_path=frequency_list,
@@ -220,10 +219,11 @@ def build_enriched_state(
         "schema": state.schema,
         "snapshot_manifest": str(snapshot_manifest),
         "source_file": str(resolved_source_file),
-        "diagnostic_output": str(master_db_output),
         "source": source_report,
         "summary": master_json["summary"],
     }
+    if master_db_output is not None:
+        source_database_report["diagnostic_output"] = str(master_db_output)
     return EnrichedStateBuildResult(
         state=state,
         source_database_report=source_database_report,
@@ -236,8 +236,8 @@ def build_enriched_state(
 def build_package(
     snapshot_manifest: Path,
     source_file: Path | None,
-    master_db_output: Path,
-    enriched_db_output: Path,
+    master_db_output: Path | None,
+    enriched_db_output: Path | None,
     hsk_data_dir: Path,
     frequency_list: Path,
     deck_config_path: Path | None,

@@ -12,9 +12,12 @@ nix-build
 
 `default.nix` invokes one build entry point during the normal APKG build.
 
-- `build/generate_hanzi_deck.py`: build the typed lexicon state, write diagnostic JSON artifacts, and generate the APKG.
+- `build/generate_hanzi_deck.py`: build the typed lexicon state and generate the APKG.
   The build writes one stage-oriented `build_reports/build_report.json` with source, enrichment, matching, selection,
   audio, HanziWriter, and package summaries.
+  Full diagnostic lexicon JSON dumps are off by default; pass `--master-db-output` and/or `--enriched-db-output`
+  when running the CLI directly, or build with `nix-build --arg writeDiagnosticDatabases true` to include them under
+  `result/diagnostics/`.
 
 ## Utilities
 
