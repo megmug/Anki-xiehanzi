@@ -669,44 +669,67 @@ def matching_also_pr_reading_values(item: dict[str, Any], context_key: str) -> l
     return readings
 
 
-def consume_exact_definition_also_pr_bucket(
+def add_also_pr_readings_to_form(item: dict[str, Any], form: LexiconForm, context_key: str) -> dict[str, Any]:
+    old_readings = list(form.pinyin_readings)
+    requested_readings = [
+        pinyin_reading_in_reference_spacing(reading, item["dictionary"]["pinyin"])
+        for reading in matching_also_pr_reading_values(item, context_key)
+    ]
+    added = form.add_pinyin_readings(" / ".join(requested_readings))
+    return {
+        "target": item["target"],
+        "dictionary_primary_pinyin": form.pinyin,
+        "requested_pinyin_readings": requested_readings,
+        "old_pinyin_readings": old_readings,
+        "added_pinyin_readings": added,
+        "new_pinyin_readings": list(form.pinyin_readings),
+    }
+
+
+def validate_exact_definition_also_pr_item(entry: dict[str, Any], form: LexiconForm, item: dict[str, Any]) -> None:
+    if not definition_sets_exact(definitions_from_meaning_html(entry["meaning_html"]), list(form.definitions)):
+        raise ValueError(f"Exact-definition also-pr bucket selected a non-exact-definition pair: {item!r}")
+
+
+def validate_semicolon_split_exact_definition_also_pr_item(
+    _entry: dict[str, Any],
+    _form: LexiconForm,
+    item: dict[str, Any],
+) -> None:
+    context = item["context"].get("semicolon_split_exact_definition_also_pr")
+    if not context:
+        raise ValueError(f"Semicolon-split exact-definition also-pr bucket lacks context: {item!r}")
+    if set(context["source_expanded_definitions"]) != set(context["dictionary_expanded_definitions"]):
+        raise ValueError(f"Semicolon-split exact-definition also-pr bucket has mismatched definitions: {item!r}")
+
+
+def consume_also_pr_bucket(
     state: LexiconState,
     deck_entries: list[dict[str, Any]],
     pipeline: dict[str, Any],
     form_stats: dict[str, Any],
+    *,
+    bucket: str,
+    context_key: str,
+    match_type: str,
+    state_effect: str,
+    validate_item: Callable[[dict[str, Any], LexiconForm, dict[str, Any]], None],
 ) -> dict[str, Any]:
-    selected_items = pipeline["bucket_results"]["exact_definition_also_pr"]["selected_items"]
+    selected_items = pipeline["bucket_results"][bucket]["selected_items"]
     consumed_entries: list[dict[str, Any]] = []
     added_readings: list[dict[str, Any]] = []
 
     for item in sorted(selected_items, key=pair_source_form_id):
         word, form, _, _ = target_word_and_form_from_pair(state, item)
         entry = deck_entry_for_pair(deck_entries, item)
-        if not definition_sets_exact(definitions_from_meaning_html(entry["meaning_html"]), list(form.definitions)):
-            raise ValueError(f"Exact-definition also-pr bucket selected a non-exact-definition pair: {item!r}")
-
+        validate_item(entry, form, item)
         apply_entry_metadata_to_selected_form(word, form, entry)
-        old_readings = list(form.pinyin_readings)
-        requested_readings = [
-            pinyin_reading_in_reference_spacing(reading, item["dictionary"]["pinyin"])
-            for reading in matching_also_pr_reading_values(item, "exact_definition_also_pr")
-        ]
-        added = form.add_pinyin_readings(" / ".join(requested_readings))
+        reading_record = add_also_pr_readings_to_form(item, form, context_key)
         word.sort_forms_by_pinyin()
         form_stats["matched"] += 1
-        record_form_match(form_stats, "exact_definition_also_pr")
+        record_form_match(form_stats, match_type)
 
-        added_readings.append(
-            {
-                "entry": entry_summary(entry),
-                "target": item["target"],
-                "dictionary_primary_pinyin": form.pinyin,
-                "requested_pinyin_readings": requested_readings,
-                "old_pinyin_readings": old_readings,
-                "added_pinyin_readings": added,
-                "new_pinyin_readings": list(form.pinyin_readings),
-            }
-        )
+        added_readings.append({"entry": entry_summary(entry), **reading_record})
         consumed_entries.append(entry)
 
     return {
@@ -714,8 +737,27 @@ def consume_exact_definition_also_pr_bucket(
         "entry_count": len(consumed_entries),
         "added_readings": added_readings,
         "form_stats": form_stats,
-        "state_effect": "applied exact-definition tags and metadata and added explicitly attested also-pr readings",
+        "state_effect": state_effect,
     }
+
+
+def consume_exact_definition_also_pr_bucket(
+    state: LexiconState,
+    deck_entries: list[dict[str, Any]],
+    pipeline: dict[str, Any],
+    form_stats: dict[str, Any],
+) -> dict[str, Any]:
+    return consume_also_pr_bucket(
+        state=state,
+        deck_entries=deck_entries,
+        pipeline=pipeline,
+        form_stats=form_stats,
+        bucket="exact_definition_also_pr",
+        context_key="exact_definition_also_pr",
+        match_type="exact_definition_also_pr",
+        state_effect="applied exact-definition tags and metadata and added explicitly attested also-pr readings",
+        validate_item=validate_exact_definition_also_pr_item,
+    )
 
 
 def consume_semicolon_split_exact_definition_also_pr_bucket(
@@ -724,52 +766,19 @@ def consume_semicolon_split_exact_definition_also_pr_bucket(
     pipeline: dict[str, Any],
     form_stats: dict[str, Any],
 ) -> dict[str, Any]:
-    selected_items = pipeline["bucket_results"]["semicolon_split_exact_definition_also_pr"]["selected_items"]
-    consumed_entries: list[dict[str, Any]] = []
-    added_readings: list[dict[str, Any]] = []
-
-    for item in sorted(selected_items, key=pair_source_form_id):
-        context = item["context"].get("semicolon_split_exact_definition_also_pr")
-        if not context:
-            raise ValueError(f"Semicolon-split exact-definition also-pr bucket lacks context: {item!r}")
-        if set(context["source_expanded_definitions"]) != set(context["dictionary_expanded_definitions"]):
-            raise ValueError(f"Semicolon-split exact-definition also-pr bucket has mismatched definitions: {item!r}")
-
-        word, form, _, _ = target_word_and_form_from_pair(state, item)
-        entry = deck_entry_for_pair(deck_entries, item)
-        apply_entry_metadata_to_selected_form(word, form, entry)
-        old_readings = list(form.pinyin_readings)
-        requested_readings = [
-            pinyin_reading_in_reference_spacing(reading, item["dictionary"]["pinyin"])
-            for reading in matching_also_pr_reading_values(item, "semicolon_split_exact_definition_also_pr")
-        ]
-        added = form.add_pinyin_readings(" / ".join(requested_readings))
-        word.sort_forms_by_pinyin()
-        form_stats["matched"] += 1
-        record_form_match(form_stats, "semicolon_split_exact_definition_also_pr")
-
-        added_readings.append(
-            {
-                "entry": entry_summary(entry),
-                "target": item["target"],
-                "dictionary_primary_pinyin": form.pinyin,
-                "requested_pinyin_readings": requested_readings,
-                "old_pinyin_readings": old_readings,
-                "added_pinyin_readings": added,
-                "new_pinyin_readings": list(form.pinyin_readings),
-            }
-        )
-        consumed_entries.append(entry)
-
-    return {
-        "entries": [entry_summary(entry) for entry in consumed_entries],
-        "entry_count": len(consumed_entries),
-        "added_readings": added_readings,
-        "form_stats": form_stats,
-        "state_effect": (
+    return consume_also_pr_bucket(
+        state=state,
+        deck_entries=deck_entries,
+        pipeline=pipeline,
+        form_stats=form_stats,
+        bucket="semicolon_split_exact_definition_also_pr",
+        context_key="semicolon_split_exact_definition_also_pr",
+        match_type="semicolon_split_exact_definition_also_pr",
+        state_effect=(
             "applied semicolon-split exact-definition tags and metadata and added explicitly attested also-pr readings"
         ),
-    }
+        validate_item=validate_semicolon_split_exact_definition_also_pr_item,
+    )
 
 
 def consume_missing_dictionary_word_bucket(
