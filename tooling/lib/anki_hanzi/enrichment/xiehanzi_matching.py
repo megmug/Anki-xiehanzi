@@ -909,8 +909,7 @@ SEMICOLON_SPLIT_EXACT_DEFINITION_ALSO_PR_UNIQUE_RULE = MatchingRuleDefinition(
         "At least one source Pinyin reading is an extra also-pr reading not already on the dictionary form",
     ),
     selected_pair=(
-        "the unique semicolon-split exact-definition pair whose source Pinyin is fully explained by also-pr "
-        "readings"
+        "the unique semicolon-split exact-definition pair whose source Pinyin is fully explained by also-pr readings"
     ),
     handler=match_semicolon_split_exact_definition_also_pr_pairs,
 )
@@ -933,6 +932,7 @@ DEFAULT_UNRESOLVED_RULE = MatchingRuleDefinition(
     requires=("No higher-priority pair-pipeline step consumed this source form",),
     handler=match_default_unresolved_pairs,
 )
+
 
 def candidate_count_buckets_for_source_forms(
     entry_reports_by_id: dict[int, dict[str, Any]],

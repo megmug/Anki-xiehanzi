@@ -20,6 +20,8 @@ EXTRA_AUDIO_DIR = DECK_INPUTS_DIR / "extra_audio"
 HANZI_WRITER_PACKAGE_JSON = Path("node_modules/hanzi-writer/package.json")
 HANZI_WRITER_BUNDLE = Path("node_modules/hanzi-writer/dist/hanzi-writer.min.js")
 HANZI_WRITER_DATA_DIR = Path("node_modules/hanzi-writer-data")
+HANZI_WRITER_BUNDLE_MARKER = "/*! Hanzi Writer v"
+HANZI_WRITER_DATA_BUNDLE_MARKER = "<!-- __HANZI_WRITER_DATA_BUNDLE__ -->"
 
 LEVELS = ["1", "2", "3", "4", "5", "6", "7-9"]
 CARD_TYPES = ["Meaning", "Pinyin", "Write"]
@@ -397,8 +399,22 @@ def read_hanzi_writer_bundle() -> str:
     )
 
 
+def replace_unique_template_marker(template: str, marker: str, replacement: str, label: str) -> str:
+    marker_count = template.count(marker)
+    if marker_count != 1:
+        raise ValueError(f"Expected exactly one {label} marker, found {marker_count}")
+    return template.replace(marker, replacement, 1)
+
+
+def remove_optional_template_marker(template: str, marker: str, label: str) -> str:
+    marker_count = template.count(marker)
+    if marker_count > 1:
+        raise ValueError(f"Expected at most one {label} marker, found {marker_count}")
+    return template.replace(marker, "", 1)
+
+
 def inject_hanzi_writer_bundle(template: str) -> str:
-    start_marker = "    /*! Hanzi Writer v"
+    start_marker = f"    {HANZI_WRITER_BUNDLE_MARKER}"
     script_start = template.find(start_marker)
     if script_start < 0:
         raise ValueError("Could not find embedded Hanzi Writer bundle start marker")
@@ -416,27 +432,20 @@ def inject_hanzi_writer_bundle(template: str) -> str:
 def inject_hanzi_data_bundle(template: str, bundle_path: Path) -> str:
     """Inject hanzi-writer-data JS bundle directly into the template as inline script."""
     if not bundle_path.exists():
-        return template
+        return remove_optional_template_marker(
+            template,
+            HANZI_WRITER_DATA_BUNDLE_MARKER,
+            "hanzi-writer-data bundle",
+        )
 
     bundle = bundle_path.read_text(encoding="utf-8")
-    # Find a good insertion point - after the hanzi-writer bundle script
-    marker = "</script>"
-    # Find the 3rd </script> (after Persistence, hanzi-writer bundle, and colorize-pinyin)
-    pos = 0
-    for _ in range(3):
-        pos = template.find(marker, pos)
-        if pos < 0:
-            break
-        pos += len(marker)
-
-    if pos < 0:
-        # Fallback: insert before </body> or at the end
-        pos = template.find("</body>")
-        if pos < 0:
-            pos = len(template)
-
-    inline_script = f"\n<script>\n{bundle}\n</script>\n"
-    return template[:pos] + inline_script + template[pos:]
+    inline_script = f"<script>\n{bundle}\n</script>\n"
+    return replace_unique_template_marker(
+        template,
+        HANZI_WRITER_DATA_BUNDLE_MARKER,
+        inline_script,
+        "hanzi-writer-data bundle",
+    )
 
 
 def inject_card_settings(template: str, card_type: str, config: DeckConfig) -> str:
@@ -451,10 +460,16 @@ def read_template(
 ) -> str:
     template = read_text(path)
     template = inject_card_settings(template, card_type, config)
-    if card_type == "Write" and "/*! Hanzi Writer v" in template:
+    if card_type == "Write" and HANZI_WRITER_BUNDLE_MARKER in template:
         template = inject_hanzi_writer_bundle(template)
         if hw_data_bundle:
             template = inject_hanzi_data_bundle(template, hw_data_bundle)
+        else:
+            template = remove_optional_template_marker(
+                template,
+                HANZI_WRITER_DATA_BUNDLE_MARKER,
+                "hanzi-writer-data bundle",
+            )
     return template
 
 

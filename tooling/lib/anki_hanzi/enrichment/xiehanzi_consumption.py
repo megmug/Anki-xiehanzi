@@ -417,6 +417,7 @@ ASSERT_DEFAULT_UNRESOLVED_EMPTY_RULE = ConsumptionRuleDefinition(
     handler=assert_default_unresolved_empty_pairs,
 )
 
+
 def deck_entries_for_source_form_ids(
     deck_entries: list[dict[str, Any]], source_form_ids: set[int]
 ) -> list[dict[str, Any]]:
@@ -1084,6 +1085,7 @@ ASSERT_DEFAULT_UNRESOLVED_BUCKET_EMPTY_RULE = StateConsumptionRuleDefinition(
     state_effect="assert default_unresolved is empty and make no state changes",
     handler=assert_default_unresolved_bucket_empty,
 )
+
 
 def apply_pipeline_enrichment_to_state(
     state: LexiconState,
