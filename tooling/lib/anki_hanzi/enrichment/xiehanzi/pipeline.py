@@ -60,6 +60,7 @@ from anki_hanzi.enrichment.xiehanzi.reports import (
     build_enrichment_summary,
     build_matching_report,
 )
+from anki_hanzi.json_io import write_json
 
 
 DEFAULT_MASTER_DB = Path("master_db_output/cc_cedict_master.json")
@@ -68,14 +69,6 @@ DEFAULT_REPORT = Path("master_db_output/hanzi_enrichment_report.json")
 DEFAULT_MATCHING_REPORT = Path("master_db_output/hanzi_matching_report.json")
 DEFAULT_DECK_INPUTS_DIR = Path("deck_inputs")
 DEFAULT_HSK_DATA_DIR = DEFAULT_DECK_INPUTS_DIR / "hsk-3.0-words-list/New HSK (2025)/Anki xiehanzi"
-
-
-def write_json(path: Path, data: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
 
 
 def apply_source_prelude_rules(

@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import re
 import sys
 import tempfile
@@ -24,6 +23,10 @@ import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+
+from anki_hanzi.json_io import json_text, write_json
 
 DEFAULT_SOURCE_URL = "https://www.mdbg.net/chinese/export/cedict/cedict_1_0_ts_utf-8_mdbg.zip"
 DEFAULT_VENDOR_DIR = Path("deck_inputs/cc-cedict")
@@ -119,10 +122,7 @@ def write_snapshot(source_text: bytes, manifest: dict[str, Any], dry_run: bool) 
 
     DEFAULT_VENDOR_DIR.mkdir(parents=True, exist_ok=True)
     DEFAULT_VENDOR_TEXT.write_bytes(source_text)
-    DEFAULT_MANIFEST.write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    write_json(DEFAULT_MANIFEST, manifest)
     DEFAULT_README.write_text(render_readme(manifest), encoding="utf-8")
 
 
@@ -170,7 +170,7 @@ def main() -> int:
         temp_dir.cleanup()
     action = "validated" if args.dry_run else "updated"
     print(f"CC-CEDICT snapshot {action}")
-    print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
+    print(json_text(manifest), end="")
     return 0
 
 

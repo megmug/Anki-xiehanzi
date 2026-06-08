@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import tempfile
@@ -25,6 +24,7 @@ from anki_hanzi.deck.hanzi_writer import build_hanzi_writer_bundle, is_writable_
 from anki_hanzi.deck.models import create_models
 from anki_hanzi.deck.reports import DeckBuildReportInput, build_deck_report
 from anki_hanzi.enrichment import xiehanzi as xiehanzi_enrichment
+from anki_hanzi.json_io import write_json
 from anki_hanzi.lexicon import ENRICHED_LEXICON_SCHEMA, LexiconState
 from anki_hanzi.lexicon.cc_cedict import load_cedict_state, load_snapshot_manifest, resolve_source_file
 
@@ -46,14 +46,6 @@ DEFAULT_GENANKI_TIMESTAMP = 1779251987.6
 DEFAULT_GENERATED_ZIP_DATETIME = (2026, 5, 20, 6, 39, 48)
 DEFAULT_ZIP_DATETIME = (1980, 1, 1, 0, 0, 0)
 GENERATED_ZIP_MEMBERS = {"collection.anki2", "media"}
-
-
-def write_json(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
 
 
 def build_decks(
