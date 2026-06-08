@@ -6,7 +6,7 @@ import re
 from collections.abc import Callable
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from anki_hanzi.lexicon import LexiconForm, LexiconState, LexiconWord
 from anki_hanzi.pinyin import numbered_pinyin_token_pairs
@@ -29,7 +29,12 @@ from anki_hanzi.enrichment.xiehanzi_model import (
 )
 
 
-RuleHandler = Callable[..., dict[str, Any]]
+SourcePreludeMatchingHandler = Callable[
+    [dict[int, dict[str, Any]], dict[str, list["TargetFormRef"]], set[int], str, str],
+    SourcePreludeRuleResult,
+]
+PairMatchingHandler = Callable[[list[PipelineItem], str, str], MatchingRuleResult]
+MatchingRuleHandler = SourcePreludeMatchingHandler | PairMatchingHandler
 PairContext = dict[str, Any]
 PairContextPredicate = Callable[[PipelineItem], PairContext | None]
 PairPredicate = Callable[[PipelineItem], bool]
@@ -65,8 +70,26 @@ class MatchingRuleDefinition:
     name: str
     scope: str
     requires: tuple[str, ...]
-    handler: RuleHandler
+    handler: MatchingRuleHandler
     selected_pair: str | None = None
+
+    def match_source_prelude(
+        self,
+        entry_reports_by_id: dict[int, dict[str, Any]],
+        target_form_index: dict[str, list["TargetFormRef"]],
+        remaining_source_form_ids: set[int],
+        bucket: str,
+    ) -> SourcePreludeRuleResult:
+        if self.scope != "source_prelude":
+            raise ValueError(f"matching rule {self.name!r} is not a source prelude rule")
+        handler = cast(SourcePreludeMatchingHandler, self.handler)
+        return handler(entry_reports_by_id, target_form_index, remaining_source_form_ids, bucket, self.name)
+
+    def match_pairs(self, working_pairs: list[PipelineItem], bucket: str) -> MatchingRuleResult:
+        if self.scope not in {"pair_pipeline", "terminal"}:
+            raise ValueError(f"matching rule {self.name!r} is not a pair-pipeline rule")
+        handler = cast(PairMatchingHandler, self.handler)
+        return handler(working_pairs, bucket, self.name)
 
 
 @dataclass(frozen=True)

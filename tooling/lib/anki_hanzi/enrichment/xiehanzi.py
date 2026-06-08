@@ -91,18 +91,17 @@ def apply_source_prelude_rules(
         input_source_form_count = len(remaining_source_form_ids)
 
         for rule in definition.matching_rules:
-            result = rule.handler(
+            result = rule.match_source_prelude(
                 entry_reports_by_id,
                 target_form_index,
                 remaining_source_form_ids,
                 definition.name,
-                rule.name,
             )
             selected_items.extend(result["selected_items"])
 
         consumption_rule = definition.consumption_rule
         consumption: SourcePreludeConsumption = (
-            consumption_rule.handler(selected_items, remaining_source_form_ids)
+            consumption_rule.consume_source_prelude(selected_items, remaining_source_form_ids)
             if consumption_rule is not None
             else empty_source_prelude_consumption(remaining_source_form_ids)
         )
@@ -134,13 +133,13 @@ def apply_pair_pipeline_rules(working_pairs: list[PipelineItem]) -> PairPipeline
         selected_items: list[PipelineItem] = []
 
         for rule in definition.matching_rules:
-            result = rule.handler(input_items, definition.name, rule.name)
+            result = rule.match_pairs(input_items, definition.name)
             selected_items.extend(result["selected_items"])
             remaining_items = result["remaining_items"]
 
         consumption_rule = definition.consumption_rule
         consumption: PairConsumption = (
-            consumption_rule.handler(selected_items, remaining_items)
+            consumption_rule.consume_pairs(selected_items, remaining_items)
             if consumption_rule is not None
             else empty_pair_consumption(remaining_items)
         )
@@ -159,11 +158,11 @@ def apply_pair_pipeline_rules(working_pairs: list[PipelineItem]) -> PairPipeline
     for definition in bucket_definitions_by_phase("terminal"):
         input_items = remaining_items
         rule = definition.matching_rules[0]
-        result = rule.handler(input_items, definition.name, rule.name)
+        result = rule.match_pairs(input_items, definition.name)
         selected_items = result["selected_items"]
         consumption_rule = definition.consumption_rule
         consumption: PairConsumption = (
-            consumption_rule.handler(selected_items, result["remaining_items"])
+            consumption_rule.consume_pairs(selected_items, result["remaining_items"])
             if consumption_rule is not None
             else empty_pair_consumption(result["remaining_items"])
         )

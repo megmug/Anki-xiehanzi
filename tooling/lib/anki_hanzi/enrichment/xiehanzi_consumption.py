@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from anki_hanzi.lexicon import LexiconForm, LexiconState, LexiconWord
 from anki_hanzi.pinyin import (
@@ -25,6 +25,9 @@ from anki_hanzi.enrichment.xiehanzi_rule_helpers import (
     pinyin_rule_kind,
 )
 from anki_hanzi.enrichment.xiehanzi_model import (
+    PairConsumption,
+    PipelineItem,
+    SourcePreludeConsumption,
     bucket_matching_pair_count,
     bucket_source_form_ids,
     pair_source_form_id,
@@ -32,8 +35,12 @@ from anki_hanzi.enrichment.xiehanzi_model import (
 from anki_hanzi.enrichment.xiehanzi_source import entry_summary
 
 
-ConsumptionRuleHandler = Callable[..., dict[str, Any]]
-StateConsumptionRuleHandler = Callable[..., dict[str, Any]]
+SourcePreludeConsumptionHandler = Callable[[list[PipelineItem], set[int]], SourcePreludeConsumption]
+PairConsumptionHandler = Callable[[list[PipelineItem], list[PipelineItem]], PairConsumption]
+ConsumptionRuleHandler = SourcePreludeConsumptionHandler | PairConsumptionHandler
+MissingDictionaryWordStateHandler = Callable[[LexiconState, list[dict[str, Any]], dict[str, Any]], dict[str, Any]]
+BucketStateHandler = Callable[[LexiconState, list[dict[str, Any]], dict[str, Any], dict[str, Any]], dict[str, Any]]
+StateConsumptionRuleHandler = MissingDictionaryWordStateHandler | BucketStateHandler
 
 
 @dataclass(frozen=True)
@@ -43,6 +50,22 @@ class ConsumptionRuleDefinition:
     enrichment_effect: str
     handler: ConsumptionRuleHandler
 
+    def consume_source_prelude(
+        self,
+        selected_items: list[PipelineItem],
+        remaining_source_form_ids: set[int],
+    ) -> SourcePreludeConsumption:
+        handler = cast(SourcePreludeConsumptionHandler, self.handler)
+        return handler(selected_items, remaining_source_form_ids)
+
+    def consume_pairs(
+        self,
+        selected_items: list[PipelineItem],
+        remaining_items: list[PipelineItem],
+    ) -> PairConsumption:
+        handler = cast(PairConsumptionHandler, self.handler)
+        return handler(selected_items, remaining_items)
+
 
 @dataclass(frozen=True)
 class StateConsumptionRuleDefinition:
@@ -50,6 +73,20 @@ class StateConsumptionRuleDefinition:
     bucket: str
     state_effect: str
     handler: StateConsumptionRuleHandler
+
+    def apply_to_state(
+        self,
+        state: LexiconState,
+        deck_entries: list[dict[str, Any]],
+        pipeline: dict[str, Any],
+        form_stats: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self.bucket == "missing_dictionary_word":
+            handler = cast(MissingDictionaryWordStateHandler, self.handler)
+            return handler(state, deck_entries, pipeline)
+
+        handler = cast(BucketStateHandler, self.handler)
+        return handler(state, deck_entries, pipeline, form_stats)
 
 
 def build_synthetic_words(missing_entries: list[dict[str, Any]]) -> list[LexiconWord]:
@@ -132,9 +169,9 @@ def new_form_stats() -> dict[str, Any]:
 
 
 def drop_missing_dictionary_word_source_forms(
-    selected_items: list[dict[str, Any]],
+    selected_items: list[PipelineItem],
     remaining_source_form_ids: set[int],
-) -> dict[str, Any]:
+) -> SourcePreludeConsumption:
     consumed_source_form_ids = bucket_source_form_ids(selected_items) & remaining_source_form_ids
     remaining_source_form_ids.difference_update(consumed_source_form_ids)
     return {
@@ -146,12 +183,12 @@ def drop_missing_dictionary_word_source_forms(
 
 
 def drop_source_form_pairs(
-    selected_items: list[dict[str, Any]],
-    remaining_items: list[dict[str, Any]],
-) -> dict[str, Any]:
+    selected_items: list[PipelineItem],
+    remaining_items: list[PipelineItem],
+) -> PairConsumption:
     consumed_source_form_ids = bucket_source_form_ids(selected_items)
-    remaining_after_consumption: list[dict[str, Any]] = []
-    removed_from_remaining_items: list[dict[str, Any]] = []
+    remaining_after_consumption: list[PipelineItem] = []
+    removed_from_remaining_items: list[PipelineItem] = []
 
     for item in remaining_items:
         if pair_source_form_id(item) in consumed_source_form_ids:
@@ -170,9 +207,9 @@ def drop_source_form_pairs(
 
 
 def assert_default_unresolved_empty_pairs(
-    selected_items: list[dict[str, Any]],
-    remaining_items: list[dict[str, Any]],
-) -> dict[str, Any]:
+    selected_items: list[PipelineItem],
+    remaining_items: list[PipelineItem],
+) -> PairConsumption:
     if selected_items:
         sample = [
             {
@@ -923,16 +960,8 @@ def apply_pipeline_enrichment_to_state(
     form_stats = new_form_stats()
 
     for rule in state_consumption_rules:
-        if rule.bucket == "missing_dictionary_word":
-            result = rule.handler(state, deck_entries, pipeline)
-        else:
-            result = rule.handler(
-                state=state,
-                deck_entries=deck_entries,
-                pipeline=pipeline,
-                form_stats=form_stats,
-            )
-            form_stats = result.get("form_stats", form_stats)
+        result = rule.apply_to_state(state, deck_entries, pipeline, form_stats)
+        form_stats = result.get("form_stats", form_stats)
         result.setdefault("state_effect", rule.state_effect)
         result["state_consumption_rule"] = rule.name
         bucket_results[rule.bucket] = result
