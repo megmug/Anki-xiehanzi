@@ -402,10 +402,7 @@ let
 
       mkdir -p "$out"
       cp "anki-hanzi.apkg" "$out/anki-hanzi-${resolvedBuildId}.apkg"
-      cp build_reports/generate_hanzi_report.json "$out/"
-      cp master_db_output/cc_cedict_hanzi_enriched.json "$out/"
-      cp master_db_output/hanzi_enrichment_report.json "$out/"
-      cp master_db_output/hanzi_matching_report.json "$out/"
+      cp build_reports/build_report.json "$out/"
       find tooling/utilities -maxdepth 1 -type f -name 'migrate-*.py' -exec cp {} "$out/" \;
 
       runHook postInstall

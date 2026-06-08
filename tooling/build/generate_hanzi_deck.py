@@ -14,13 +14,11 @@ from anki_hanzi.deck import common
 from anki_hanzi.deck.build import (
     DEFAULT_DECK_CONFIG,
     DEFAULT_ENRICHED_DB_OUTPUT,
-    DEFAULT_ENRICHMENT_REPORT,
     DEFAULT_FREQUENCY_LIST,
     DEFAULT_GENERATED_ZIP_DATETIME,
     DEFAULT_GENANKI_TIMESTAMP,
     DEFAULT_HSK_DATA_DIR,
     DEFAULT_MASTER_DB,
-    DEFAULT_MATCHING_REPORT,
     DEFAULT_REPORT_PATH,
     DEFAULT_SNAPSHOT_MANIFEST,
     build_package,
@@ -57,18 +55,6 @@ def parse_args() -> argparse.Namespace:
         help="Diagnostic enriched JSON output.",
     )
     parser.add_argument(
-        "--enrichment-report",
-        type=Path,
-        default=DEFAULT_ENRICHMENT_REPORT,
-        help="Diagnostic enrichment report JSON output.",
-    )
-    parser.add_argument(
-        "--matching-report",
-        type=Path,
-        default=DEFAULT_MATCHING_REPORT,
-        help="Report-only xiehanzi-to-CC-CEDICT candidate matching JSON output.",
-    )
-    parser.add_argument(
         "--hsk-data-dir", type=Path, default=DEFAULT_HSK_DATA_DIR, help="Prepared hanzi HSK TSV directory."
     )
     parser.add_argument(
@@ -79,7 +65,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--config", type=Path, default=DEFAULT_DECK_CONFIG, help="Deck selection JSON config.")
     parser.add_argument("--output", type=Path, default=None, help="Output APKG path.")
-    parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH, help="Output report JSON path.")
+    parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH, help="Output build report JSON path.")
     parser.add_argument(
         "--timestamp",
         type=float,
@@ -121,8 +107,6 @@ def main() -> int:
         source_file=args.source_file,
         master_db_output=args.master_db_output,
         enriched_db_output=args.enriched_db_output,
-        enrichment_report_path=args.enrichment_report,
-        matching_report_path=args.matching_report,
         hsk_data_dir=args.hsk_data_dir,
         frequency_list=args.frequency_list,
         deck_config_path=args.config,
@@ -132,7 +116,11 @@ def main() -> int:
         deterministic_zip=args.deterministic_zip,
         zip_generated_datetime=args.zip_generated_datetime,
     )
-    console_report = {key: value for key, value in report.items() if key != "dropped_duplicates"}
+    console_report = {
+        "schema": report["schema"],
+        "summary": report["summary"],
+        "artifacts": report["artifacts"],
+    }
     print(json_text(console_report), end="")
     return 0
 

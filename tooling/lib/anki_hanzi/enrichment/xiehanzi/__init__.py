@@ -5,9 +5,8 @@ from anki_hanzi.enrichment.xiehanzi.pipeline import (
     DEFAULT_FREQUENCY_LIST,
     DEFAULT_HSK_DATA_DIR,
     DEFAULT_MASTER_DB,
-    DEFAULT_MATCHING_REPORT,
     DEFAULT_OUTPUT,
-    DEFAULT_REPORT,
+    XiehanziEnrichmentResult,
     enrich_database,
     enrich_state,
 )
@@ -18,10 +17,9 @@ __all__ = [
     "DEFAULT_FREQUENCY_LIST",
     "DEFAULT_HSK_DATA_DIR",
     "DEFAULT_MASTER_DB",
-    "DEFAULT_MATCHING_REPORT",
     "DEFAULT_OUTPUT",
-    "DEFAULT_REPORT",
     "HANZI_DEDUPE_KEY",
+    "XiehanziEnrichmentResult",
     "enrich_database",
     "enrich_state",
 ]

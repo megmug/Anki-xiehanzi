@@ -11,6 +11,7 @@ The optional enriched JSON and report are diagnostic build artifacts.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -65,10 +66,15 @@ from anki_hanzi.json_io import write_json
 
 DEFAULT_MASTER_DB = Path("master_db_output/cc_cedict_master.json")
 DEFAULT_OUTPUT = Path("master_db_output/cc_cedict_hanzi_enriched.json")
-DEFAULT_REPORT = Path("master_db_output/hanzi_enrichment_report.json")
-DEFAULT_MATCHING_REPORT = Path("master_db_output/hanzi_matching_report.json")
 DEFAULT_DECK_INPUTS_DIR = Path("deck_inputs")
 DEFAULT_HSK_DATA_DIR = DEFAULT_DECK_INPUTS_DIR / "hsk-3.0-words-list/New HSK (2025)/Anki xiehanzi"
+
+
+@dataclass(frozen=True)
+class XiehanziEnrichmentResult:
+    enriched: dict[str, Any]
+    enrichment_report: dict[str, Any]
+    matching_report: dict[str, Any]
 
 
 def apply_source_prelude_rules(
@@ -245,11 +251,9 @@ def enrich_state(
     master_state: LexiconState,
     input_label: str,
     output_path: Path,
-    report_path: Path,
-    matching_report_path: Path | None,
     hsk_data_dir: Path,
     frequency_list_path: Path,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> XiehanziEnrichmentResult:
     base_snapshot = LexiconBaseSnapshot.from_state(master_state)
     base_words = list(master_state.sorted_words())
     base_word_index = {word.simplified: word for word in master_state.sorted_words()}
@@ -311,8 +315,6 @@ def enrich_state(
     report = build_enrichment_report(
         input_label=input_label,
         output_path=output_path,
-        report_path=report_path,
-        matching_report_path=matching_report_path,
         enriched=enriched,
         matching_report=matching_report,
         pipeline_enrichment=pipeline_enrichment,
@@ -324,11 +326,12 @@ def enrich_state(
         dropped_duplicates=dropped_duplicates,
     )
 
-    if matching_report_path is not None:
-        write_json(matching_report_path, matching_report)
     write_json(output_path, enriched)
-    write_json(report_path, report)
-    return enriched, report
+    return XiehanziEnrichmentResult(
+        enriched=enriched,
+        enrichment_report=report,
+        matching_report=matching_report,
+    )
 
 
 def load_master_state(master_db_path: Path) -> LexiconState:
@@ -338,17 +341,13 @@ def load_master_state(master_db_path: Path) -> LexiconState:
 def enrich_database(
     master_db_path: Path,
     output_path: Path,
-    report_path: Path,
-    matching_report_path: Path | None,
     hsk_data_dir: Path,
     frequency_list_path: Path,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> XiehanziEnrichmentResult:
     return enrich_state(
         master_state=load_master_state(master_db_path),
         input_label=str(master_db_path),
         output_path=output_path,
-        report_path=report_path,
-        matching_report_path=matching_report_path,
         hsk_data_dir=hsk_data_dir,
         frequency_list_path=frequency_list_path,
     )

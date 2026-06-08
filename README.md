@@ -59,7 +59,7 @@ If no NVIDIA driver is available, or on macOS, the build uses CPU PyTorch.
 Audio builds that need network access for model downloads may require a relaxed Nix sandbox configuration.
 
 `nix-build` creates the default `result` symlink.
-The build result contains the hash-named APKG, generated reports, including the xiehanzi-to-CC-CEDICT matching report, and any checked-in migration scripts.
+The build result contains the hash-named APKG, one stage-oriented `build_report.json`, and any checked-in migration scripts.
 
 ## Repository Layout
 

@@ -13,7 +13,8 @@ nix-build
 `default.nix` invokes one build entry point during the normal APKG build.
 
 - `build/generate_hanzi_deck.py`: build the typed lexicon state, write diagnostic JSON artifacts, and generate the APKG.
-  The build also writes `master_db_output/hanzi_matching_report.json`, a report-only xiehanzi-to-CC-CEDICT candidate matching report.
+  The build writes one stage-oriented `build_reports/build_report.json` with source, enrichment, matching, selection,
+  audio, HanziWriter, and package summaries.
 
 ## Utilities
 

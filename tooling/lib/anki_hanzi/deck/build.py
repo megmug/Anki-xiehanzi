@@ -6,6 +6,7 @@ import os
 import subprocess
 import tempfile
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -32,20 +33,27 @@ from anki_hanzi.lexicon.cc_cedict import load_cedict_state, load_snapshot_manife
 DEFAULT_FREQUENCY_LIST = xiehanzi_enrichment.DEFAULT_FREQUENCY_LIST
 DEFAULT_HSK_DATA_DIR = xiehanzi_enrichment.DEFAULT_HSK_DATA_DIR
 DEFAULT_MASTER_DB = xiehanzi_enrichment.DEFAULT_MASTER_DB
-DEFAULT_MATCHING_REPORT = xiehanzi_enrichment.DEFAULT_MATCHING_REPORT
 DEFAULT_ENRICHED_DB_OUTPUT = xiehanzi_enrichment.DEFAULT_OUTPUT
-DEFAULT_ENRICHMENT_REPORT = xiehanzi_enrichment.DEFAULT_REPORT
 HANZI_DEDUPE_KEY = xiehanzi_enrichment.HANZI_DEDUPE_KEY
 enrich_state = xiehanzi_enrichment.enrich_state
 
 DEFAULT_SNAPSHOT_MANIFEST = Path("deck_inputs/cc-cedict/snapshot.json")
 DEFAULT_DECK_CONFIG = Path("deck_inputs/deck_config.json")
 DEFAULT_AUDIO_EXCEPTIONS = Path("deck_inputs/audio_generation_exceptions.json")
-DEFAULT_REPORT_PATH = Path("build_reports/generate_hanzi_report.json")
+DEFAULT_REPORT_PATH = Path("build_reports/build_report.json")
 DEFAULT_GENANKI_TIMESTAMP = 1779251987.6
 DEFAULT_GENERATED_ZIP_DATETIME = (2026, 5, 20, 6, 39, 48)
 DEFAULT_ZIP_DATETIME = (1980, 1, 1, 0, 0, 0)
 GENERATED_ZIP_MEMBERS = {"collection.anki2", "media"}
+
+
+@dataclass(frozen=True)
+class EnrichedStateBuildResult:
+    state: LexiconState
+    source_database_report: dict[str, Any]
+    enriched_lexicon: dict[str, Any]
+    enrichment_report: dict[str, Any]
+    matching_report: dict[str, Any]
 
 
 def build_decks(
@@ -182,11 +190,9 @@ def build_enriched_state(
     source_file: Path | None,
     master_db_output: Path,
     enriched_db_output: Path,
-    enrichment_report_path: Path,
-    matching_report_path: Path | None,
     hsk_data_dir: Path,
     frequency_list: Path,
-) -> LexiconState:
+) -> EnrichedStateBuildResult:
     manifest = load_snapshot_manifest(snapshot_manifest)
     resolved_source_file = resolve_source_file(snapshot_manifest, manifest, source_file)
     if not resolved_source_file.exists():
@@ -198,18 +204,33 @@ def build_enriched_state(
         expected_sha256=manifest["sha256"],
     )
     state.sort_forms_by_pinyin()
-    write_json(master_db_output, state.to_master_json())
+    master_json = state.to_master_json()
+    write_json(master_db_output, master_json)
 
-    enrich_state(
+    enrichment_result = enrich_state(
         master_state=state,
         input_label=str(master_db_output),
         output_path=enriched_db_output,
-        report_path=enrichment_report_path,
-        matching_report_path=matching_report_path,
         hsk_data_dir=hsk_data_dir,
         frequency_list_path=frequency_list,
     )
-    return state
+    source_report = dict(master_json["source"])
+    source_report["comment_header_lines"] = len(source_report.pop("comment_header", []))
+    source_database_report = {
+        "schema": state.schema,
+        "snapshot_manifest": str(snapshot_manifest),
+        "source_file": str(resolved_source_file),
+        "diagnostic_output": str(master_db_output),
+        "source": source_report,
+        "summary": master_json["summary"],
+    }
+    return EnrichedStateBuildResult(
+        state=state,
+        source_database_report=source_database_report,
+        enriched_lexicon=enrichment_result.enriched,
+        enrichment_report=enrichment_result.enrichment_report,
+        matching_report=enrichment_result.matching_report,
+    )
 
 
 def build_package(
@@ -217,8 +238,6 @@ def build_package(
     source_file: Path | None,
     master_db_output: Path,
     enriched_db_output: Path,
-    enrichment_report_path: Path,
-    matching_report_path: Path | None,
     hsk_data_dir: Path,
     frequency_list: Path,
     deck_config_path: Path | None,
@@ -235,16 +254,15 @@ def build_package(
         config.audio.engine,
         exceptions_path=DEFAULT_AUDIO_EXCEPTIONS,
     )
-    state = build_enriched_state(
+    enriched_state_result = build_enriched_state(
         snapshot_manifest=snapshot_manifest,
         source_file=source_file,
         master_db_output=master_db_output,
         enriched_db_output=enriched_db_output,
-        enrichment_report_path=enrichment_report_path,
-        matching_report_path=matching_report_path,
         hsk_data_dir=hsk_data_dir,
         frequency_list=frequency_list,
     )
+    state = enriched_state_result.state
     entries_by_card_type, selection_report = build_entries_from_state(
         state,
         config.selection,
@@ -284,8 +302,10 @@ def build_package(
             report_path=report_path,
             master_db_output=master_db_output,
             enriched_db_output=enriched_db_output,
-            enrichment_report_path=enrichment_report_path,
-            matching_report_path=matching_report_path,
+            source_database_report=enriched_state_result.source_database_report,
+            enriched_lexicon=enriched_state_result.enriched_lexicon,
+            enrichment_report=enriched_state_result.enrichment_report,
+            matching_report=enriched_state_result.matching_report,
             selection_report=selection_report,
             source_schema=ENRICHED_LEXICON_SCHEMA,
             build_id=build_id,
