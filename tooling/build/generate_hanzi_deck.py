@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -26,6 +25,7 @@ from anki_hanzi.deck.build import (
     DEFAULT_SNAPSHOT_MANIFEST,
     build_package,
 )
+from anki_hanzi.json_io import json_text
 
 
 def parse_zip_datetime(value: str) -> tuple[int, int, int, int, int, int]:
@@ -133,7 +133,7 @@ def main() -> int:
         zip_generated_datetime=args.zip_generated_datetime,
     )
     console_report = {key: value for key, value in report.items() if key != "dropped_duplicates"}
-    print(json.dumps(console_report, ensure_ascii=False, indent=2, sort_keys=True))
+    print(json_text(console_report), end="")
     return 0
 
 
