@@ -22,6 +22,7 @@ from anki_hanzi.deck.entries import (
     unique_audio_entries,
 )
 from anki_hanzi.deck.hanzi_writer import build_hanzi_writer_bundle, is_writable_hanzi
+from anki_hanzi.deck.reports import DeckBuildReportInput, build_deck_report
 from anki_hanzi.enrichment import xiehanzi as xiehanzi_enrichment
 from anki_hanzi.lexicon import ENRICHED_LEXICON_SCHEMA, LexiconState
 from anki_hanzi.lexicon.cc_cedict import load_cedict_state, load_snapshot_manifest, resolve_source_file
@@ -284,42 +285,36 @@ def build_package(
         zip_generated_datetime=zip_generated_datetime,
     )
 
-    total_cards = sum(len(d.notes) for d in decks)
-    unique_words = {entry.simplified.strip() for entry in all_deck_entries if entry.simplified.strip()}
-    report = {
-        "output": str(output_apkg),
-        "report": str(report_path),
-        "master_db": str(master_db_output),
-        "enriched_db": str(enriched_db_output),
-        "enrichment_report": str(enrichment_report_path),
-        "matching_report": str(matching_report_path) if matching_report_path is not None else None,
-        "deck_config": selection_report,
-        "source_schema": ENRICHED_LEXICON_SCHEMA,
-        "deck_root": common.DECK_ROOT,
-        "build_id": build_id,
-        "card_types": list(config.card_types),
-        "card_settings": config.card_settings,
-        "dedupe_key": HANZI_DEDUPE_KEY,
-        "total_words": len(unique_words),
-        "entries_by_card_type": {card_type: len(entries) for card_type, entries in entries_by_card_type.items()},
-        "total_cards": total_cards,
-        "decks": len(decks),
-        "audio_files_packaged": len(media_files) - len(static_media),
-        "audio_engine": config.audio.engine,
-        "audio_voices": audio_generator.voice_report(),
-        "hanzi_writer_version": common.read_hanzi_writer_package_version(),
-        "hanzi_writer_bundle": str(common.HANZI_WRITER_BUNDLE),
-        "timestamp": timestamp,
-        "deterministic_zip": deterministic_zip,
-        "zip_datetime": DEFAULT_ZIP_DATETIME if deterministic_zip and zip_generated_datetime is None else None,
-        "zip_generated_datetime": zip_generated_datetime,
-        "generated_audio_files_count": len(audio_result.generated),
-        "failed_audio_generation": audio_result.report_failed(),
-        "skipped_audio_generation": audio_result.report_skipped(),
-        "removed_zero_length_audio_files": audio_result.removed_zero_length,
-        "dropped_duplicate_occurrences": len(state.hanzi_dropped_duplicates),
-        "dropped_duplicates": list(state.hanzi_dropped_duplicates),
-        "missing_audio_files": missing_audio,
-    }
+    report = build_deck_report(
+        DeckBuildReportInput(
+            output_apkg=output_apkg,
+            report_path=report_path,
+            master_db_output=master_db_output,
+            enriched_db_output=enriched_db_output,
+            enrichment_report_path=enrichment_report_path,
+            matching_report_path=matching_report_path,
+            selection_report=selection_report,
+            source_schema=ENRICHED_LEXICON_SCHEMA,
+            build_id=build_id,
+            card_types=config.card_types,
+            card_settings=config.card_settings,
+            dedupe_key=HANZI_DEDUPE_KEY,
+            entries_by_card_type=entries_by_card_type,
+            all_entries=all_deck_entries,
+            total_cards=sum(len(deck.notes) for deck in decks),
+            decks_count=len(decks),
+            media_files=media_files,
+            static_media=static_media,
+            audio_engine=config.audio.engine,
+            audio_voices=audio_generator.voice_report(),
+            audio_result=audio_result,
+            timestamp=timestamp,
+            deterministic_zip=deterministic_zip,
+            default_zip_datetime=DEFAULT_ZIP_DATETIME,
+            zip_generated_datetime=zip_generated_datetime,
+            dropped_duplicates=state.hanzi_dropped_duplicates,
+            missing_audio_files=missing_audio,
+        )
+    )
     write_json(report_path, report)
     return report
