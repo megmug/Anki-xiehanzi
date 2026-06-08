@@ -407,30 +407,83 @@ def add_synthetic_words_to_state(state: LexiconState, missing_entries: list[dict
     return synthetic_words
 
 
+def validate_exact_pinyin_item(entry: dict[str, Any], form: LexiconForm, item: dict[str, Any]) -> None:
+    if pinyin_rule_kind(entry["pinyin"], form.pinyin_reading_string) != "exact":
+        raise ValueError(f"Perfect-match bucket selected a non-exact pair: {item!r}")
+
+
+def validate_format_variant_item(entry: dict[str, Any], form: LexiconForm, item: dict[str, Any]) -> None:
+    if pinyin_rule_kind(entry["pinyin"], form.pinyin_reading_string) != "format_variant":
+        raise ValueError(f"Format-variant bucket selected a non-format-variant pair: {item!r}")
+
+
+def validate_case_variant_exact_definition_item(
+    entry: dict[str, Any],
+    form: LexiconForm,
+    item: dict[str, Any],
+) -> None:
+    if pinyin_rule_kind(entry["pinyin"], form.pinyin_reading_string) != "case_variant":
+        raise ValueError(f"Case-variant bucket selected a non-case-variant pair: {item!r}")
+    if not definition_sets_exact(definitions_from_meaning_html(entry["meaning_html"]), list(form.definitions)):
+        raise ValueError(f"Case-variant bucket selected a non-exact-definition pair: {item!r}")
+
+
+def validate_exact_definition_item(entry: dict[str, Any], form: LexiconForm, item: dict[str, Any]) -> None:
+    if not definition_sets_exact(definitions_from_meaning_html(entry["meaning_html"]), list(form.definitions)):
+        raise ValueError(f"Exact-definition bucket selected a non-exact-definition pair: {item!r}")
+
+
+def consume_metadata_only_bucket(
+    state: LexiconState,
+    deck_entries: list[dict[str, Any]],
+    pipeline: dict[str, Any],
+    form_stats: dict[str, Any],
+    *,
+    bucket: str,
+    match_type: str,
+    state_effect: str,
+    validate_item: Callable[[dict[str, Any], LexiconForm, dict[str, Any]], None],
+    include_form_stats: bool = True,
+) -> dict[str, Any]:
+    selected_items = pipeline["bucket_results"][bucket]["selected_items"]
+    consumed_entries: list[dict[str, Any]] = []
+
+    for item in sorted(selected_items, key=pair_source_form_id):
+        word, form, _, _ = target_word_and_form_from_pair(state, item)
+        entry = deck_entry_for_pair(deck_entries, item)
+        validate_item(entry, form, item)
+        apply_entry_metadata_to_selected_form(word, form, entry)
+        form_stats["matched"] += 1
+        record_form_match(form_stats, match_type)
+        consumed_entries.append(entry)
+
+    result = {
+        "entries": [entry_summary(entry) for entry in consumed_entries],
+        "entry_count": len(consumed_entries),
+        "state_effect": state_effect,
+    }
+    if include_form_stats:
+        result["form_stats"] = form_stats
+    return result
+
+
 def consume_perfect_match_bucket(
     state: LexiconState,
     deck_entries: list[dict[str, Any]],
     pipeline: dict[str, Any],
     form_stats: dict[str, Any],
 ) -> dict[str, Any]:
-    selected_items = pipeline["bucket_results"]["perfect_match"]["selected_items"]
-    consumed_entries: list[dict[str, Any]] = []
-
-    for item in sorted(selected_items, key=pair_source_form_id):
-        word, form, _, _ = target_word_and_form_from_pair(state, item)
-        entry = deck_entry_for_pair(deck_entries, item)
-        if pinyin_rule_kind(entry["pinyin"], form.pinyin_reading_string) != "exact":
-            raise ValueError(f"Perfect-match bucket selected a non-exact pair: {item!r}")
-        apply_entry_metadata_to_selected_form(word, form, entry)
-        form_stats["matched"] += 1
-        record_form_match(form_stats, "exact")
-        consumed_entries.append(entry)
-
-    return {
-        "entries": [entry_summary(entry) for entry in consumed_entries],
-        "entry_count": len(consumed_entries),
-        "state_effect": "applied exact-pair tags and metadata directly to the selected dictionary forms",
-    }
+    return consume_metadata_only_bucket(
+        state=state,
+        deck_entries=deck_entries,
+        pipeline=pipeline,
+        form_stats=form_stats,
+        bucket="perfect_match",
+        match_type="exact",
+        state_effect="applied exact-pair tags and metadata directly to the selected dictionary forms",
+        validate_item=validate_exact_pinyin_item,
+        include_form_stats=False,
+    )
 
 
 def consume_manual_pinyin_override_bucket(
@@ -516,25 +569,16 @@ def consume_format_variant_bucket(
     pipeline: dict[str, Any],
     form_stats: dict[str, Any],
 ) -> dict[str, Any]:
-    selected_items = pipeline["bucket_results"]["format_variant_unique"]["selected_items"]
-    consumed_entries: list[dict[str, Any]] = []
-
-    for item in sorted(selected_items, key=pair_source_form_id):
-        word, form, _, _ = target_word_and_form_from_pair(state, item)
-        entry = deck_entry_for_pair(deck_entries, item)
-        if pinyin_rule_kind(entry["pinyin"], form.pinyin_reading_string) != "format_variant":
-            raise ValueError(f"Format-variant bucket selected a non-format-variant pair: {item!r}")
-        apply_entry_metadata_to_selected_form(word, form, entry)
-        form_stats["matched"] += 1
-        record_form_match(form_stats, "format_variant")
-        consumed_entries.append(entry)
-
-    return {
-        "entries": [entry_summary(entry) for entry in consumed_entries],
-        "entry_count": len(consumed_entries),
-        "form_stats": form_stats,
-        "state_effect": "applied format-variant tags and metadata directly without changing dictionary Pinyin",
-    }
+    return consume_metadata_only_bucket(
+        state=state,
+        deck_entries=deck_entries,
+        pipeline=pipeline,
+        form_stats=form_stats,
+        bucket="format_variant_unique",
+        match_type="format_variant",
+        state_effect="applied format-variant tags and metadata directly without changing dictionary Pinyin",
+        validate_item=validate_format_variant_item,
+    )
 
 
 def consume_spoken_tone_variant_bucket(
@@ -594,27 +638,16 @@ def consume_case_variant_exact_definition_bucket(
     pipeline: dict[str, Any],
     form_stats: dict[str, Any],
 ) -> dict[str, Any]:
-    selected_items = pipeline["bucket_results"]["case_variant_exact_definition"]["selected_items"]
-    consumed_entries: list[dict[str, Any]] = []
-
-    for item in sorted(selected_items, key=pair_source_form_id):
-        word, form, _, _ = target_word_and_form_from_pair(state, item)
-        entry = deck_entry_for_pair(deck_entries, item)
-        if pinyin_rule_kind(entry["pinyin"], form.pinyin_reading_string) != "case_variant":
-            raise ValueError(f"Case-variant bucket selected a non-case-variant pair: {item!r}")
-        if not definition_sets_exact(definitions_from_meaning_html(entry["meaning_html"]), list(form.definitions)):
-            raise ValueError(f"Case-variant bucket selected a non-exact-definition pair: {item!r}")
-        apply_entry_metadata_to_selected_form(word, form, entry)
-        form_stats["matched"] += 1
-        record_form_match(form_stats, "case_variant")
-        consumed_entries.append(entry)
-
-    return {
-        "entries": [entry_summary(entry) for entry in consumed_entries],
-        "entry_count": len(consumed_entries),
-        "form_stats": form_stats,
-        "state_effect": "applied case-variant tags and metadata directly without changing dictionary Pinyin",
-    }
+    return consume_metadata_only_bucket(
+        state=state,
+        deck_entries=deck_entries,
+        pipeline=pipeline,
+        form_stats=form_stats,
+        bucket="case_variant_exact_definition",
+        match_type="case_variant",
+        state_effect="applied case-variant tags and metadata directly without changing dictionary Pinyin",
+        validate_item=validate_case_variant_exact_definition_item,
+    )
 
 
 def consume_exact_definition_bucket(
@@ -623,25 +656,16 @@ def consume_exact_definition_bucket(
     pipeline: dict[str, Any],
     form_stats: dict[str, Any],
 ) -> dict[str, Any]:
-    selected_items = pipeline["bucket_results"]["exact_definition"]["selected_items"]
-    consumed_entries: list[dict[str, Any]] = []
-
-    for item in sorted(selected_items, key=pair_source_form_id):
-        word, form, _, _ = target_word_and_form_from_pair(state, item)
-        entry = deck_entry_for_pair(deck_entries, item)
-        if not definition_sets_exact(definitions_from_meaning_html(entry["meaning_html"]), list(form.definitions)):
-            raise ValueError(f"Exact-definition bucket selected a non-exact-definition pair: {item!r}")
-        apply_entry_metadata_to_selected_form(word, form, entry)
-        form_stats["matched"] += 1
-        record_form_match(form_stats, "exact_definition")
-        consumed_entries.append(entry)
-
-    return {
-        "entries": [entry_summary(entry) for entry in consumed_entries],
-        "entry_count": len(consumed_entries),
-        "form_stats": form_stats,
-        "state_effect": "applied exact-definition tags and metadata directly without changing dictionary Pinyin",
-    }
+    return consume_metadata_only_bucket(
+        state=state,
+        deck_entries=deck_entries,
+        pipeline=pipeline,
+        form_stats=form_stats,
+        bucket="exact_definition",
+        match_type="exact_definition",
+        state_effect="applied exact-definition tags and metadata directly without changing dictionary Pinyin",
+        validate_item=validate_exact_definition_item,
+    )
 
 
 def compact_lower_pinyin_key_from_record(record: dict[str, Any]) -> str:
