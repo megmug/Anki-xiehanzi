@@ -7,18 +7,21 @@ applies the selected buckets to the LexiconState.
 from __future__ import annotations
 
 import re
-import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from dragonmapper import transcriptions
-
 from anki_hanzi.lexicon import LexiconForm, LexiconState, LexiconWord
+from anki_hanzi.pinyin import (
+    apply_reference_pinyin_case,
+    numbered_pinyin,
+    pinyin_formatting_key,
+    pinyin_reading_in_reference_spacing,
+    source_pinyin_in_dictionary_format,
+)
 from anki_hanzi.enrichment.xiehanzi_rule_helpers import (
     definition_sets_exact,
     definitions_from_meaning_html,
-    normalize_pinyin_u_variants,
     pinyin_rule_kind,
 )
 from anki_hanzi.enrichment.xiehanzi_model import (
@@ -31,9 +34,6 @@ from anki_hanzi.enrichment.xiehanzi_source import entry_summary
 
 ConsumptionRuleHandler = Callable[..., dict[str, Any]]
 StateConsumptionRuleHandler = Callable[..., dict[str, Any]]
-
-PINYIN_SEPARATOR_RE = re.compile(r"[\s'’\-·]+")
-PINYIN_NUMBERED_TOKEN_RE = re.compile(r"[A-Za-züÜv:]+[1-5]?")
 
 
 @dataclass(frozen=True)
@@ -50,100 +50,6 @@ class StateConsumptionRuleDefinition:
     bucket: str
     state_effect: str
     handler: StateConsumptionRuleHandler
-
-
-@dataclass(frozen=True)
-class PinyinReading:
-    spaced: str
-    compact: str
-    lower_compact: str
-
-
-def numbered_pinyin_part(value: str) -> str:
-    value = unicodedata.normalize("NFC", value.strip())
-    if not value:
-        return ""
-    if re.search(r"\d", value):
-        numbered = value
-    else:
-        try:
-            numbered = transcriptions.accented_to_numbered(value)
-        except ValueError:
-            numbered = value
-    return normalize_pinyin_u_variants(numbered)
-
-
-def canonical_pinyin_readings(value: str) -> list[PinyinReading]:
-    readings: list[PinyinReading] = []
-    for part in re.split(r"/", value or ""):
-        numbered = numbered_pinyin_part(part)
-        if not numbered:
-            continue
-
-        spaced = PINYIN_SEPARATOR_RE.sub(" ", numbered).strip()
-        spaced = re.sub(r"\s+", " ", spaced)
-        compact = spaced.replace(" ", "")
-        if compact:
-            readings.append(
-                PinyinReading(
-                    spaced=spaced,
-                    compact=compact,
-                    lower_compact=compact.lower(),
-                )
-            )
-    return readings
-
-
-def numbered_pinyin_tokens(value: str) -> list[str]:
-    return PINYIN_NUMBERED_TOKEN_RE.findall(numbered_pinyin_part(value))
-
-
-def split_numbered_pinyin_token(value: str) -> tuple[str, str]:
-    match = re.fullmatch(r"([A-Za-züÜv:]+)([1-5]?)", value)
-    if match is None:
-        raise ValueError(f"Invalid numbered Pinyin token: {value!r}")
-    return match.group(1), match.group(2)
-
-
-def pinyin_base_key(value: str) -> str:
-    return normalize_pinyin_u_variants(value).casefold()
-
-
-def source_tone_on_reference_base(source_token: str, reference_token: str) -> str:
-    source_base, source_tone = split_numbered_pinyin_token(source_token)
-    reference_base, _ = split_numbered_pinyin_token(reference_token)
-    if pinyin_base_key(source_base) != pinyin_base_key(reference_base):
-        raise ValueError(
-            f"Cannot align spoken-tone Pinyin token {source_token!r} with dictionary token {reference_token!r}"
-        )
-    return f"{reference_base}{source_tone}"
-
-
-def source_pinyin_in_dictionary_format(source_pinyin: str, dictionary_pinyin: str) -> str:
-    source_parts = [part for part in re.split(r"/", str(source_pinyin or "")) if part.strip()]
-    dictionary_parts = [part for part in re.split(r"/", str(dictionary_pinyin or "")) if part.strip()]
-    if len(source_parts) != len(dictionary_parts):
-        raise ValueError(
-            f"Cannot align spoken-tone Pinyin readings {source_pinyin!r} with dictionary readings {dictionary_pinyin!r}"
-        )
-
-    formatted_readings: list[str] = []
-    for source_part, dictionary_part in zip(source_parts, dictionary_parts):
-        source_tokens = numbered_pinyin_tokens(source_part)
-        dictionary_tokens = numbered_pinyin_tokens(dictionary_part)
-        if len(source_tokens) != len(dictionary_tokens):
-            raise ValueError(
-                f"Cannot align spoken-tone Pinyin syllables {source_part!r} with dictionary syllables "
-                f"{dictionary_part!r}"
-            )
-        formatted_readings.append(
-            " ".join(
-                source_tone_on_reference_base(source_token, dictionary_token)
-                for source_token, dictionary_token in zip(source_tokens, dictionary_tokens)
-            )
-        )
-
-    return " / ".join(formatted_readings)
 
 
 def build_synthetic_words(missing_entries: list[dict[str, Any]]) -> list[LexiconWord]:
@@ -176,66 +82,6 @@ def build_synthetic_words(missing_entries: list[dict[str, Any]]) -> list[Lexicon
 
 def record_form_match(form_stats: dict[str, Any], match_type: str) -> None:
     form_stats["match_types"][match_type] += 1
-
-
-def pinyin_formatting_key(value: str) -> str:
-    return "/".join(reading.compact for reading in canonical_pinyin_readings(value))
-
-
-def apply_reference_pinyin_case(source_pinyin: str, reference_pinyin: str) -> str:
-    reference_by_key = {
-        reading.lower_compact: reading.compact for reading in canonical_pinyin_readings(reference_pinyin)
-    }
-    cased_tokens: list[str] = []
-
-    for source_part in re.split(r"(/)", source_pinyin or ""):
-        if source_part == "/":
-            cased_tokens.append(source_part)
-            continue
-
-        leading_space = re.match(r"\s*", source_part).group(0)
-        trailing_space = re.search(r"\s*$", source_part).group(0)
-        stripped_source = source_part.strip()
-        if not stripped_source:
-            cased_tokens.append(source_part)
-            continue
-
-        numbered_source = numbered_pinyin_part(stripped_source)
-        source_readings = canonical_pinyin_readings(numbered_source)
-        if not source_readings:
-            cased_tokens.append(source_part)
-            continue
-
-        reference_compact = reference_by_key.get(source_readings[0].lower_compact)
-        if not reference_compact:
-            cased_tokens.append(f"{leading_space}{numbered_source}{trailing_space}")
-            continue
-
-        chars = list(numbered_source)
-        reference_index = 0
-        for index, char in enumerate(chars):
-            if PINYIN_SEPARATOR_RE.fullmatch(char):
-                continue
-            if reference_index >= len(reference_compact):
-                break
-
-            reference_char = reference_compact[reference_index]
-            if char.isalpha() and reference_char.isalpha() and char.lower() == reference_char.lower():
-                chars[index] = char.upper() if reference_char.isupper() else char.lower()
-            reference_index += 1
-
-        cased_tokens.append(f"{leading_space}{''.join(chars)}{trailing_space}")
-
-    return "".join(cased_tokens)
-
-
-def numbered_pinyin(value: str) -> str:
-    if re.search(r"\d", value):
-        return normalize_pinyin_u_variants(value)
-    try:
-        return transcriptions.accented_to_numbered(value)
-    except ValueError:
-        return value
 
 
 def non_exact_match_record(
@@ -784,26 +630,6 @@ def matching_also_pr_reading_values(item: dict[str, Any], context_key: str) -> l
     if not readings:
         raise ValueError(f"{context_key} bucket has no addable extra readings: {item!r}")
     return readings
-
-
-def pinyin_reading_in_reference_spacing(reading: str, reference_pinyin: str) -> str:
-    source_tokens = numbered_pinyin_tokens(reading)
-    if not source_tokens:
-        return numbered_pinyin_part(reading)
-
-    for reference_part in re.split(r"/", str(reference_pinyin or "")):
-        reference_tokens = numbered_pinyin_tokens(reference_part)
-        if len(reference_tokens) != len(source_tokens):
-            continue
-        try:
-            return " ".join(
-                source_tone_on_reference_base(source_token, reference_token)
-                for source_token, reference_token in zip(source_tokens, reference_tokens)
-            )
-        except ValueError:
-            return " ".join(source_tokens)
-
-    return " ".join(source_tokens)
 
 
 def consume_exact_definition_also_pr_bucket(

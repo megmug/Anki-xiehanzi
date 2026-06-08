@@ -7,10 +7,9 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from dragonmapper import transcriptions
+from anki_hanzi.pinyin import PINYIN_SEPARATOR_RE, strict_numbered_preserve_case
 
 
-PINYIN_SEPARATOR_RE = re.compile(r"[\s'’·-]+")
 LI_RE = re.compile(r"<li>(.*?)</li>", re.IGNORECASE | re.DOTALL)
 
 
@@ -20,25 +19,6 @@ class RulePinyinReading:
     compact_preserve_case: str
     compact_lower: str
     toneless_lower: str
-
-
-def normalize_pinyin_u_variants(value: str) -> str:
-    return value.replace("ü", "v").replace("Ü", "V").replace("u:", "v").replace("U:", "V")
-
-
-def strict_numbered_preserve_case(value: str) -> str:
-    value = unicodedata.normalize("NFC", str(value or "").strip())
-    value = re.sub(r"\s+", " ", value)
-    if not value:
-        return ""
-    if re.search(r"\d", value):
-        numbered = value
-    else:
-        try:
-            numbered = transcriptions.accented_to_numbered(value)
-        except ValueError:
-            numbered = value
-    return normalize_pinyin_u_variants(numbered)
 
 
 def pinyin_rule_readings(value: str) -> list[RulePinyinReading]:

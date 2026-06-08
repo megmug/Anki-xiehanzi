@@ -19,7 +19,8 @@ from anki_hanzi.deck import common
 from anki_hanzi.enrichment import xiehanzi as xiehanzi_enrichment
 from anki_hanzi.lexicon import ENRICHED_LEXICON_SCHEMA, LexiconForm, LexiconState, LexiconWord
 from anki_hanzi.lexicon.cc_cedict import load_cedict_state, load_snapshot_manifest, resolve_source_file
-from anki_hanzi.rendering.meaning_html import numbered_to_display, render_meaning_group, render_meaning_html
+from anki_hanzi.pinyin import numbered_to_display
+from anki_hanzi.rendering.meaning_html import render_meaning_group, render_meaning_html
 
 
 DEFAULT_FREQUENCY_LIST = xiehanzi_enrichment.DEFAULT_FREQUENCY_LIST

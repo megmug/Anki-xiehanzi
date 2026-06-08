@@ -2,36 +2,14 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from anki_hanzi.pinyin import normalize_single_pinyin, sorted_pinyin_readings, split_pinyin_readings
+
 
 ENRICHED_LEXICON_SCHEMA = "hanzi-enriched-lexicon-v2"
-
-
-def split_pinyin_readings(value: Any) -> list[str]:
-    readings: list[str] = []
-    if isinstance(value, list):
-        values = value
-    else:
-        values = [value]
-
-    for item in values:
-        for part in re.split(r"/", str(item or "")):
-            reading = re.sub(r"\s+", " ", part.strip())
-            if reading and reading not in readings:
-                readings.append(reading)
-    return readings
-
-
-def normalize_single_pinyin(value: Any) -> str:
-    return re.sub(r"\s+", " ", str(value or "").strip())
-
-
-def sorted_pinyin_readings(values: list[str]) -> list[str]:
-    return sorted(dict.fromkeys(values), key=lambda value: (value.casefold(), value))
 
 
 def normalized_tags(values: list[str]) -> list[str]:

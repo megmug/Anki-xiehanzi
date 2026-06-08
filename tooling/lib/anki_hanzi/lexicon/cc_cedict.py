@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from anki_hanzi.lexicon.state import LexiconSource, LexiconState, LexiconWord, ParseSummary
+from anki_hanzi.pinyin import normalize_single_pinyin
 
 
 LINE_RE = re.compile(r"^\S+\s+(?P<simplified>\S+)\s+\[(?P<pinyin>.+?)\]\s+/(?P<definitions>.*)/$")
@@ -24,7 +25,7 @@ def sha256_file(path: Path) -> str:
 
 
 def parse_pinyin(value: str) -> str:
-    return re.sub(r"\s+", " ", (value or "").strip())
+    return normalize_single_pinyin(value)
 
 
 def split_definitions(definitions_blob: str) -> list[str]:

@@ -9,11 +9,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from anki_hanzi.lexicon import LexiconForm, LexiconState, LexiconWord
+from anki_hanzi.pinyin import numbered_pinyin_token_pairs
 from anki_hanzi.enrichment.xiehanzi_rule_helpers import (
     definition_sets_exact,
     definitions_from_meaning_html,
     normalize_matching_definition,
-    normalize_pinyin_u_variants,
     pinyin_rule_kind as classify_pinyin,
     pinyin_rule_readings as pinyin_readings,
     strip_html_text,
@@ -31,7 +31,6 @@ PairContext = dict[str, Any]
 PairContextPredicate = Callable[[dict[str, Any]], PairContext | None]
 PairPredicate = Callable[[dict[str, Any]], bool]
 
-PINYIN_NUMBERED_TOKEN_RE = re.compile(r"[A-Za-züÜv:]+[1-5]?")
 ALSO_PR_RE = re.compile(r"also\s+pr\.\s*\[([^\]]+)\]", re.IGNORECASE)
 PINYIN_BLOCK_RE = re.compile(
     r'<span\s+class="pinYinWrapper"[^>]*>(?P<pinyin>.*?)</span>\s*<ul>(?P<definitions>.*?)</ul>',
@@ -301,18 +300,6 @@ def manual_pinyin_override_for_source(source: dict[str, Any]) -> dict[str, str] 
     }
 
 
-def numbered_pinyin_tokens(value: str) -> list[tuple[str, str]]:
-    tokens: list[tuple[str, str]] = []
-    for token in PINYIN_NUMBERED_TOKEN_RE.findall(value or ""):
-        match = re.match(r"(.+?)([1-5])?$", token)
-        if match is None:
-            continue
-        base = normalize_pinyin_u_variants(match.group(1)).casefold()
-        tone = match.group(2) or ""
-        tokens.append((base, tone))
-    return tokens
-
-
 def spoken_tone_variant_kinds(source_pinyin: str, dictionary_pinyin: str) -> tuple[str, ...]:
     kinds: set[str] = set()
     source_readings = pinyin_readings(source_pinyin)
@@ -321,8 +308,8 @@ def spoken_tone_variant_kinds(source_pinyin: str, dictionary_pinyin: str) -> tup
         return ()
 
     for source_reading, dictionary_reading in zip(source_readings, dictionary_readings):
-        source_tokens = numbered_pinyin_tokens(source_reading.strict)
-        dictionary_tokens = numbered_pinyin_tokens(dictionary_reading.strict)
+        source_tokens = numbered_pinyin_token_pairs(source_reading.strict)
+        dictionary_tokens = numbered_pinyin_token_pairs(dictionary_reading.strict)
         if len(source_tokens) != len(dictionary_tokens):
             return ()
 
