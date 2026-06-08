@@ -22,6 +22,7 @@ from anki_hanzi.deck.entries import (
     unique_audio_entries,
 )
 from anki_hanzi.deck.hanzi_writer import build_hanzi_writer_bundle, is_writable_hanzi
+from anki_hanzi.deck.models import create_models
 from anki_hanzi.deck.reports import DeckBuildReportInput, build_deck_report
 from anki_hanzi.enrichment import xiehanzi as xiehanzi_enrichment
 from anki_hanzi.lexicon import ENRICHED_LEXICON_SCHEMA, LexiconState
@@ -271,7 +272,7 @@ def build_package(
     hw_bundle_path.parent.mkdir(parents=True, exist_ok=True)
     build_hanzi_writer_bundle(write_entries, hw_bundle_path)
 
-    models = common.create_models(config, hw_bundle_path if hw_bundle_path.exists() else None)
+    models = create_models(config, hw_bundle_path if hw_bundle_path.exists() else None)
     decks = build_decks(config, models, entries_by_card_type, build_id)
 
     media_files, missing_audio = collect_media(audio_deck_entries, static_media)

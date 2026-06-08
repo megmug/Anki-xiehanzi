@@ -10,6 +10,7 @@ from typing import Any
 from anki_hanzi.audio.api import AudioGenerationResult
 from anki_hanzi.deck import common
 from anki_hanzi.deck.entries import EnrichedWordEntry
+from anki_hanzi.deck.templates import read_hanzi_writer_package_version
 
 
 @dataclass(frozen=True)
@@ -69,7 +70,7 @@ def build_deck_report(data: DeckBuildReportInput) -> dict[str, Any]:
         "audio_files_packaged": len(data.media_files) - len(data.static_media),
         "audio_engine": data.audio_engine,
         "audio_voices": data.audio_voices,
-        "hanzi_writer_version": common.read_hanzi_writer_package_version(),
+        "hanzi_writer_version": read_hanzi_writer_package_version(),
         "hanzi_writer_bundle": str(common.HANZI_WRITER_BUNDLE),
         "timestamp": data.timestamp,
         "deterministic_zip": data.deterministic_zip,
