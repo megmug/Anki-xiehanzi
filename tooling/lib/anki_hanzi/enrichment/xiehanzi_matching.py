@@ -19,7 +19,10 @@ from anki_hanzi.enrichment.xiehanzi_rule_helpers import (
     strip_html_text,
 )
 from anki_hanzi.enrichment.xiehanzi_model import (
+    MatchingRuleResult,
     PairId,
+    PipelineItem,
+    SourcePreludeRuleResult,
     bucket_source_form_ids,
     group_pairs_by_source_form,
     matching_pair_identity,
@@ -28,8 +31,8 @@ from anki_hanzi.enrichment.xiehanzi_model import (
 
 RuleHandler = Callable[..., dict[str, Any]]
 PairContext = dict[str, Any]
-PairContextPredicate = Callable[[dict[str, Any]], PairContext | None]
-PairPredicate = Callable[[dict[str, Any]], bool]
+PairContextPredicate = Callable[[PipelineItem], PairContext | None]
+PairPredicate = Callable[[PipelineItem], bool]
 
 ALSO_PR_RE = re.compile(r"also\s+pr\.\s*\[([^\]]+)\]", re.IGNORECASE)
 PINYIN_BLOCK_RE = re.compile(
@@ -210,9 +213,9 @@ def matching_pair_for_bucket(item: dict[str, Any], *, bucket: str, matching_rule
 
 
 def matching_result(
-    selected_items: list[dict[str, Any]],
-    remaining_items: list[dict[str, Any]],
-) -> dict[str, Any]:
+    selected_items: list[PipelineItem],
+    remaining_items: list[PipelineItem],
+) -> MatchingRuleResult:
     return {
         "selected_items": selected_items,
         "remaining_items": remaining_items,
@@ -221,16 +224,16 @@ def matching_result(
 
 
 def split_pairs_by_selected_ids(
-    working_pairs: list[dict[str, Any]],
+    working_pairs: list[PipelineItem],
     selected_pair_ids: set[PairId],
     *,
     bucket: str,
     matching_rule: str,
     context_by_pair_id: dict[PairId, PairContext] | None = None,
     context_name: str | None = None,
-) -> dict[str, Any]:
-    selected_items: list[dict[str, Any]] = []
-    remaining_items: list[dict[str, Any]] = []
+) -> MatchingRuleResult:
+    selected_items: list[PipelineItem] = []
+    remaining_items: list[PipelineItem] = []
 
     for pair in working_pairs:
         pair_id = matching_pair_identity(pair)
@@ -249,7 +252,7 @@ def split_pairs_by_selected_ids(
 
 
 def select_unique_pair_ids_by_source(
-    working_pairs: list[dict[str, Any]],
+    working_pairs: list[PipelineItem],
     predicate: PairPredicate,
 ) -> set[PairId]:
     selected_pair_ids: set[PairId] = set()
@@ -266,7 +269,7 @@ def select_unique_pair_ids_by_source(
 
 
 def select_unique_pair_contexts_by_source(
-    working_pairs: list[dict[str, Any]],
+    working_pairs: list[PipelineItem],
     context_for_pair: PairContextPredicate,
 ) -> dict[PairId, PairContext]:
     context_by_pair_id: dict[PairId, PairContext] = {}
@@ -537,7 +540,7 @@ def match_missing_dictionary_word_sources(
     remaining_source_form_ids: set[int],
     bucket: str,
     matching_rule: str,
-) -> dict[str, Any]:
+) -> SourcePreludeRuleResult:
     selected_items = [
         missing_dictionary_word_report(entry_reports_by_id[source_form_id], bucket=bucket, matching_rule=matching_rule)
         for source_form_id in sorted(remaining_source_form_ids)
@@ -554,7 +557,7 @@ def materialize_simplified_match_pairs(
     target_form_index: dict[str, list[TargetFormRef]],
     source_form_ids: set[int],
 ) -> dict[str, Any]:
-    working_pairs: list[dict[str, Any]] = []
+    working_pairs: list[PipelineItem] = []
 
     for source_form_id in sorted(source_form_ids):
         entry_report = entry_reports_by_id[source_form_id]
@@ -588,10 +591,10 @@ def materialize_simplified_match_pairs(
 
 
 def match_manual_pinyin_override_pairs(
-    working_pairs: list[dict[str, Any]],
+    working_pairs: list[PipelineItem],
     bucket: str,
     matching_rule: str,
-) -> dict[str, Any]:
+) -> MatchingRuleResult:
     overrides_by_pair_id: dict[PairId, dict[str, str]] = {}
 
     for source_pairs in group_pairs_by_source_form(working_pairs).values():
@@ -622,10 +625,10 @@ def match_manual_pinyin_override_pairs(
 
 
 def match_strict_pinyin_exact_unique_pairs(
-    working_pairs: list[dict[str, Any]],
+    working_pairs: list[PipelineItem],
     bucket: str,
     matching_rule: str,
-) -> dict[str, Any]:
+) -> MatchingRuleResult:
     return match_unique_pinyin_kind_pairs(
         working_pairs,
         bucket=bucket,
@@ -635,10 +638,10 @@ def match_strict_pinyin_exact_unique_pairs(
 
 
 def match_format_variant_unique_pairs(
-    working_pairs: list[dict[str, Any]],
+    working_pairs: list[PipelineItem],
     bucket: str,
     matching_rule: str,
-) -> dict[str, Any]:
+) -> MatchingRuleResult:
     return match_unique_pinyin_kind_pairs(
         working_pairs,
         bucket=bucket,
@@ -648,11 +651,11 @@ def match_format_variant_unique_pairs(
 
 
 def match_spoken_tone_variant_pairs(
-    working_pairs: list[dict[str, Any]],
+    working_pairs: list[PipelineItem],
     bucket: str,
     matching_rule: str,
-) -> dict[str, Any]:
-    def context_for_pair(pair: dict[str, Any]) -> PairContext | None:
+) -> MatchingRuleResult:
+    def context_for_pair(pair: PipelineItem) -> PairContext | None:
         if pair_pinyin_kind(pair) != "toneless":
             return None
         kinds = spoken_tone_variant_kinds(pair["source"]["pinyin"], pair["dictionary"]["pinyin"])
@@ -672,10 +675,10 @@ def match_spoken_tone_variant_pairs(
 
 
 def match_case_variant_exact_definition_pairs(
-    working_pairs: list[dict[str, Any]],
+    working_pairs: list[PipelineItem],
     bucket: str,
     matching_rule: str,
-) -> dict[str, Any]:
+) -> MatchingRuleResult:
     selected_pair_ids = select_unique_pair_ids_by_source(
         working_pairs,
         lambda pair: pair_pinyin_kind(pair) == "case_variant" and pair_definition_sets_exact(pair),
@@ -689,10 +692,10 @@ def match_case_variant_exact_definition_pairs(
 
 
 def match_exact_definition_also_pr_pairs(
-    working_pairs: list[dict[str, Any]],
+    working_pairs: list[PipelineItem],
     bucket: str,
     matching_rule: str,
-) -> dict[str, Any]:
+) -> MatchingRuleResult:
     context_by_pair_id = select_unique_pair_contexts_by_source(working_pairs, exact_definition_also_pr_context)
     return split_pairs_by_selected_ids(
         working_pairs,
@@ -705,10 +708,10 @@ def match_exact_definition_also_pr_pairs(
 
 
 def match_exact_definition_pairs(
-    working_pairs: list[dict[str, Any]],
+    working_pairs: list[PipelineItem],
     bucket: str,
     matching_rule: str,
-) -> dict[str, Any]:
+) -> MatchingRuleResult:
     selected_pair_ids = select_unique_pair_ids_by_source(working_pairs, pair_definition_sets_exact)
     return split_pairs_by_selected_ids(
         working_pairs,
@@ -719,10 +722,10 @@ def match_exact_definition_pairs(
 
 
 def match_semicolon_split_exact_definition_also_pr_pairs(
-    working_pairs: list[dict[str, Any]],
+    working_pairs: list[PipelineItem],
     bucket: str,
     matching_rule: str,
-) -> dict[str, Any]:
+) -> MatchingRuleResult:
     context_by_pair_id = select_unique_pair_contexts_by_source(
         working_pairs,
         semicolon_split_exact_definition_also_pr_context,
@@ -738,10 +741,10 @@ def match_semicolon_split_exact_definition_also_pr_pairs(
 
 
 def match_html_subform_definition_cover_pairs(
-    working_pairs: list[dict[str, Any]],
+    working_pairs: list[PipelineItem],
     bucket: str,
     matching_rule: str,
-) -> dict[str, Any]:
+) -> MatchingRuleResult:
     context_by_pair_id: dict[PairId, PairContext] = {}
     for source_pairs in group_pairs_by_source_form(working_pairs).values():
         context = html_subform_match_context(source_pairs)
@@ -765,12 +768,12 @@ def match_html_subform_definition_cover_pairs(
 
 
 def match_unique_pinyin_kind_pairs(
-    working_pairs: list[dict[str, Any]],
+    working_pairs: list[PipelineItem],
     *,
     bucket: str,
     matching_rule: str,
     pinyin_kind: str,
-) -> dict[str, Any]:
+) -> MatchingRuleResult:
     selected_pair_ids = select_unique_pair_ids_by_source(
         working_pairs,
         lambda pair: pair_pinyin_kind(pair) == pinyin_kind,
@@ -784,8 +787,8 @@ def match_unique_pinyin_kind_pairs(
 
 
 def match_default_unresolved_pairs(
-    working_pairs: list[dict[str, Any]], bucket: str, matching_rule: str
-) -> dict[str, Any]:
+    working_pairs: list[PipelineItem], bucket: str, matching_rule: str
+) -> MatchingRuleResult:
     selected_items = [
         matching_pair_for_bucket(pair, bucket=bucket, matching_rule=matching_rule) for pair in working_pairs
     ]

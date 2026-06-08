@@ -7,12 +7,65 @@ matching or consumption rule module.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypedDict
 
 
 PairId = tuple[int, int]
 PipelineItem = dict[str, Any]
-PipelineResult = dict[str, Any]
+
+
+class MatchingRuleResult(TypedDict):
+    selected_items: list[PipelineItem]
+    remaining_items: list[PipelineItem]
+    selected_source_form_ids: set[int]
+
+
+class SourcePreludeRuleResult(TypedDict):
+    selected_items: list[PipelineItem]
+    selected_source_form_ids: set[int]
+
+
+class SourcePreludeConsumption(TypedDict):
+    consumed_source_form_ids: set[int]
+    consumed_source_form_count: int
+    consumed_matching_pair_count: int
+    remaining_source_form_count: int
+
+
+class PairConsumption(TypedDict):
+    consumed_source_form_ids: set[int]
+    consumed_source_form_count: int
+    consumed_matching_pair_count: int
+    removed_from_remaining_matching_pair_count: int
+    remaining_items: list[PipelineItem]
+
+
+class BucketResult(TypedDict):
+    phase: str
+    bucket: str
+    input_source_form_count: int
+    input_matching_pair_count: int
+    selected_items: list[PipelineItem]
+    selected_source_form_count: int
+    selected_matching_pair_count: int
+    consumed_source_form_count: int
+    consumed_matching_pair_count: int
+    removed_from_remaining_matching_pair_count: int
+    remaining_source_form_count_after_consumption: int
+    remaining_matching_pair_count_after_consumption: int
+    items_after_consumption: list[PipelineItem]
+
+
+class SourcePreludePipelineResult(TypedDict):
+    remaining_source_form_ids: set[int]
+    bucket_results: dict[str, BucketResult]
+    consumed_by_source_form: dict[int, str]
+
+
+class PairPipelineResult(TypedDict):
+    bucket_results: dict[str, BucketResult]
+    consumed_by_source_form: dict[int, str]
+    remaining_items: list[PipelineItem]
 
 
 def pair_source_form_id(item: PipelineItem) -> int:
@@ -44,7 +97,7 @@ def group_pairs_by_source_form(working_pairs: list[PipelineItem]) -> dict[int, l
     return pairs_by_source_form
 
 
-def empty_source_prelude_consumption(remaining_source_form_ids: set[int]) -> PipelineResult:
+def empty_source_prelude_consumption(remaining_source_form_ids: set[int]) -> SourcePreludeConsumption:
     return {
         "consumed_source_form_ids": set(),
         "consumed_source_form_count": 0,
@@ -53,7 +106,7 @@ def empty_source_prelude_consumption(remaining_source_form_ids: set[int]) -> Pip
     }
 
 
-def empty_pair_consumption(remaining_items: list[PipelineItem]) -> PipelineResult:
+def empty_pair_consumption(remaining_items: list[PipelineItem]) -> PairConsumption:
     return {
         "consumed_source_form_ids": set(),
         "consumed_source_form_count": 0,
@@ -69,8 +122,8 @@ def source_prelude_bucket_result(
     phase: str,
     input_source_form_count: int,
     selected_items: list[PipelineItem],
-    consumption: PipelineResult,
-) -> PipelineResult:
+    consumption: SourcePreludeConsumption,
+) -> BucketResult:
     return {
         "phase": phase,
         "bucket": bucket,
@@ -94,9 +147,9 @@ def pair_pipeline_bucket_result(
     phase: str,
     input_items: list[PipelineItem],
     selected_items: list[PipelineItem],
-    consumption: PipelineResult,
+    consumption: PairConsumption,
     items_after_consumption: list[PipelineItem] | None = None,
-) -> PipelineResult:
+) -> BucketResult:
     remaining_items = consumption["remaining_items"]
     return {
         "phase": phase,

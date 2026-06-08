@@ -32,6 +32,12 @@ from anki_hanzi.enrichment.xiehanzi_consumption import (
     apply_pipeline_enrichment_to_state,
 )
 from anki_hanzi.enrichment.xiehanzi_model import (
+    BucketResult,
+    PairConsumption,
+    PairPipelineResult,
+    PipelineItem,
+    SourcePreludeConsumption,
+    SourcePreludePipelineResult,
     empty_pair_consumption,
     empty_source_prelude_consumption,
     pair_pipeline_bucket_result,
@@ -75,13 +81,13 @@ def write_json(path: Path, data: Any) -> None:
 def apply_source_prelude_rules(
     entry_reports_by_id: dict[int, dict[str, Any]],
     target_form_index: dict[str, list[TargetFormRef]],
-) -> dict[str, Any]:
+) -> SourcePreludePipelineResult:
     remaining_source_form_ids = set(entry_reports_by_id)
-    bucket_results: dict[str, dict[str, Any]] = {}
+    bucket_results: dict[str, BucketResult] = {}
     consumed_by_source_form: dict[int, str] = {}
 
     for definition in bucket_definitions_by_phase("source_prelude"):
-        selected_items: list[dict[str, Any]] = []
+        selected_items: list[PipelineItem] = []
         input_source_form_count = len(remaining_source_form_ids)
 
         for rule in definition.matching_rules:
@@ -95,7 +101,7 @@ def apply_source_prelude_rules(
             selected_items.extend(result["selected_items"])
 
         consumption_rule = definition.consumption_rule
-        consumption = (
+        consumption: SourcePreludeConsumption = (
             consumption_rule.handler(selected_items, remaining_source_form_ids)
             if consumption_rule is not None
             else empty_source_prelude_consumption(remaining_source_form_ids)
@@ -118,14 +124,14 @@ def apply_source_prelude_rules(
     }
 
 
-def apply_pair_pipeline_rules(working_pairs: list[dict[str, Any]]) -> dict[str, Any]:
+def apply_pair_pipeline_rules(working_pairs: list[PipelineItem]) -> PairPipelineResult:
     remaining_items = list(working_pairs)
-    bucket_results: dict[str, dict[str, Any]] = {}
+    bucket_results: dict[str, BucketResult] = {}
     consumed_by_source_form: dict[int, str] = {}
 
     for definition in bucket_definitions_by_phase("pair_pipeline"):
         input_items = remaining_items
-        selected_items: list[dict[str, Any]] = []
+        selected_items: list[PipelineItem] = []
 
         for rule in definition.matching_rules:
             result = rule.handler(input_items, definition.name, rule.name)
@@ -133,7 +139,7 @@ def apply_pair_pipeline_rules(working_pairs: list[dict[str, Any]]) -> dict[str, 
             remaining_items = result["remaining_items"]
 
         consumption_rule = definition.consumption_rule
-        consumption = (
+        consumption: PairConsumption = (
             consumption_rule.handler(selected_items, remaining_items)
             if consumption_rule is not None
             else empty_pair_consumption(remaining_items)
@@ -156,7 +162,7 @@ def apply_pair_pipeline_rules(working_pairs: list[dict[str, Any]]) -> dict[str, 
         result = rule.handler(input_items, definition.name, rule.name)
         selected_items = result["selected_items"]
         consumption_rule = definition.consumption_rule
-        consumption = (
+        consumption: PairConsumption = (
             consumption_rule.handler(selected_items, result["remaining_items"])
             if consumption_rule is not None
             else empty_pair_consumption(result["remaining_items"])
@@ -183,7 +189,7 @@ def apply_pair_pipeline_rules(working_pairs: list[dict[str, Any]]) -> dict[str, 
 
 def validate_pair_pipeline(
     initial_matching_pair_count: int,
-    bucket_results: dict[str, dict[str, Any]],
+    bucket_results: dict[str, BucketResult],
 ) -> None:
     consumed_matching_pair_count = sum(
         result["consumed_matching_pair_count"]
