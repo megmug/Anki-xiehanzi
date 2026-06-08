@@ -24,14 +24,14 @@ from anki_hanzi.enrichment.frequency import (
     TOP_FREQUENCY_THRESHOLDS,
     apply_frequency_enrichment_to_state,
 )
-from anki_hanzi.enrichment.xiehanzi_buckets import (
+from anki_hanzi.enrichment.xiehanzi.buckets import (
     bucket_definitions_by_phase,
     bucket_definitions_by_priority,
 )
-from anki_hanzi.enrichment.xiehanzi_consumption import (
+from anki_hanzi.enrichment.xiehanzi.consumption import (
     apply_pipeline_enrichment_to_state,
 )
-from anki_hanzi.enrichment.xiehanzi_model import (
+from anki_hanzi.enrichment.xiehanzi.model import (
     BucketResult,
     PairConsumption,
     PairPipelineResult,
@@ -43,19 +43,19 @@ from anki_hanzi.enrichment.xiehanzi_model import (
     pair_pipeline_bucket_result,
     source_prelude_bucket_result,
 )
-from anki_hanzi.enrichment.xiehanzi_source import (
+from anki_hanzi.enrichment.xiehanzi.source import (
     HANZI_DEDUPE_KEY,
     HANZI_FIELDS,
     dedupe_entries,
     load_hanzi_entries,
 )
-from anki_hanzi.enrichment.xiehanzi_matching import (
+from anki_hanzi.enrichment.xiehanzi.matching import (
     TargetFormRef,
     build_source_entry_reports,
     build_target_form_index,
     materialize_simplified_match_pairs,
 )
-from anki_hanzi.enrichment.xiehanzi_reports import (
+from anki_hanzi.enrichment.xiehanzi.reports import (
     build_enrichment_report,
     build_enrichment_summary,
     build_matching_report,

@@ -6,17 +6,17 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from anki_hanzi.enrichment.xiehanzi_buckets import (
+from anki_hanzi.enrichment.xiehanzi.buckets import (
     BUCKET_DEFINITIONS,
     BucketDefinition,
     bucket_definitions_by_priority,
 )
-from anki_hanzi.enrichment.xiehanzi_matching import (
+from anki_hanzi.enrichment.xiehanzi.matching import (
     candidate_count_bucket,
     candidate_count_buckets_for_source_forms,
 )
-from anki_hanzi.enrichment.xiehanzi_model import bucket_matching_pair_count, bucket_source_form_ids
-from anki_hanzi.enrichment.xiehanzi_source import LEVELS, entry_summary
+from anki_hanzi.enrichment.xiehanzi.model import bucket_matching_pair_count, bucket_source_form_ids
+from anki_hanzi.enrichment.xiehanzi.source import LEVELS, entry_summary
 
 
 def selected_source_form_count_after_consumption(result: dict[str, Any], definition: BucketDefinition) -> int:

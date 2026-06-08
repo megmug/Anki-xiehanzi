@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from anki_hanzi.enrichment.xiehanzi_consumption import (
+from anki_hanzi.enrichment.xiehanzi.consumption import (
     ASSERT_DEFAULT_UNRESOLVED_BUCKET_EMPTY_RULE,
     ASSERT_DEFAULT_UNRESOLVED_EMPTY_RULE,
     CONSUME_CASE_VARIANT_EXACT_DEFINITION_BUCKET_RULE,
@@ -30,7 +30,7 @@ from anki_hanzi.enrichment.xiehanzi_consumption import (
     DROP_SEMICOLON_SPLIT_EXACT_DEFINITION_ALSO_PR_SOURCE_FORM_PAIRS_RULE,
     StateConsumptionRuleDefinition,
 )
-from anki_hanzi.enrichment.xiehanzi_matching import (
+from anki_hanzi.enrichment.xiehanzi.matching import (
     CASE_VARIANT_EXACT_DEFINITION_UNIQUE_RULE,
     DEFAULT_UNRESOLVED_RULE,
     EXACT_DEFINITION_ALSO_PR_UNIQUE_RULE,
