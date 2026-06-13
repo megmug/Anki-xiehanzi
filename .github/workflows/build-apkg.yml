@@ -50,7 +50,7 @@ jobs:
         run: |
           mkdir -p ci-artifacts
           cp -L result/anki-hanzi-${SHORT_SHA}.apkg ci-artifacts/
-          find -H result -maxdepth 1 -type f -name '*.py' -exec cp -L {} ci-artifacts/ \;
+          cp -L result/anki-hanzi-migrator-${SHORT_SHA}.ankiaddon ci-artifacts/
           {
             echo "# anki-hanzi APKG build"
             echo
@@ -61,15 +61,14 @@ jobs:
             echo "## Included artifacts"
             echo
             echo "- \`anki-hanzi-${SHORT_SHA}.apkg\`"
-            echo "- migration scripts from the Nix result, if present"
+            echo "- \`anki-hanzi-migrator-${SHORT_SHA}.ankiaddon\`"
             echo
-            echo "## Migration script naming"
+            echo "## Migration add-on"
             echo
             echo "Release names use a UTC timestamp plus the target build hash."
-            echo "APKG filenames keep the plain target build hash."
-            echo "Migration scripts keep their checked-in filenames. A file named"
-            echo "\`migrate-<old-hash>.py\` means: migrate from that old build hash"
-            echo "to this release's target build."
+            echo "APKG and migrator add-on filenames keep the plain target build hash."
+            echo "Install the add-on in Anki, open Tools -> Migrate Anki Hanzi Deck...,"
+            echo "select the APKG, review preflight, and apply only after a full backup."
           } > ci-artifacts/README.md
 
       - name: Upload APKG artifacts

@@ -7,5 +7,4 @@ exclude = [
   "master_db_output",
   "node_modules",
   "result",
-  "tooling/utilities/migrate-*.py",
 ]

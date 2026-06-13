@@ -22,6 +22,7 @@ from anki_hanzi.deck.entries import (
     unique_audio_entries,
 )
 from anki_hanzi.deck.hanzi_writer import build_hanzi_writer_bundle, is_writable_hanzi
+from anki_hanzi.deck.migrator_addon import build_migrator_addon
 from anki_hanzi.deck.models import create_models
 from anki_hanzi.deck.reports import DeckBuildReportInput, build_deck_report
 from anki_hanzi.enrichment import xiehanzi as xiehanzi_enrichment
@@ -39,6 +40,8 @@ DEFAULT_SNAPSHOT_MANIFEST = Path("deck_inputs/cc-cedict/snapshot.json")
 DEFAULT_DECK_CONFIG = Path("deck_inputs/deck_config.json")
 DEFAULT_AUDIO_EXCEPTIONS = Path("deck_inputs/audio_generation_exceptions.json")
 DEFAULT_REPORT_PATH = Path("build_reports/build_report.json")
+DEFAULT_MIGRATOR_ADDON_SOURCE = Path("tooling/utilities/anki_hanzi_migrator")
+DEFAULT_MIGRATOR_ADDON_OUTPUT = Path("anki-hanzi-migrator.ankiaddon")
 DEFAULT_GENANKI_TIMESTAMP = 1779251987.6
 DEFAULT_GENERATED_ZIP_DATETIME = (2026, 5, 20, 6, 39, 48)
 DEFAULT_ZIP_DATETIME = (1980, 1, 1, 0, 0, 0)
@@ -91,6 +94,26 @@ def resolve_build_id() -> str:
         ).strip()
     except Exception:
         return "unknown"
+
+
+def resolve_known_build_ids(current_build_id: str) -> list[str]:
+    env_build_ids = os.environ.get("ANKI_HANZI_KNOWN_BUILD_IDS", "").strip()
+    if env_build_ids:
+        build_ids = [item.strip() for item in env_build_ids.replace(",", "\n").splitlines() if item.strip()]
+    else:
+        try:
+            output = subprocess.check_output(
+                ["git", "rev-list", "--first-parent", "--reverse", "--abbrev-commit", "--abbrev=7", "HEAD"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+            build_ids = [line.strip() for line in output.splitlines() if line.strip()]
+        except Exception:
+            build_ids = []
+
+    if current_build_id and current_build_id not in build_ids:
+        build_ids.append(current_build_id)
+    return list(dict.fromkeys(build_ids))
 
 
 def collect_media(entries: list[EnrichedWordEntry], static_media: list[str]) -> tuple[list[str], list[str]]:
@@ -243,6 +266,7 @@ def build_package(
     deck_config_path: Path | None,
     output_apkg: Path,
     report_path: Path,
+    migrator_addon_output: Path,
     timestamp: float | None,
     deterministic_zip: bool,
     zip_generated_datetime: tuple[int, int, int, int, int, int] | None,
@@ -272,6 +296,14 @@ def build_package(
     audio_deck_entries = unique_audio_entries(all_deck_entries)
     audio_jobs = audio_generator.jobs_for_texts(entry.simplified for entry in audio_deck_entries)
     build_id = resolve_build_id()
+    known_build_ids = resolve_known_build_ids(build_id)
+    build_migrator_addon(
+        source_dir=DEFAULT_MIGRATOR_ADDON_SOURCE,
+        output_path=migrator_addon_output,
+        build_id=build_id,
+        known_build_ids=known_build_ids,
+        zip_datetime=zip_generated_datetime or DEFAULT_ZIP_DATETIME,
+    )
 
     static_media = config.static_media()
     audio_result = audio_generator.generate(audio_jobs)
@@ -300,6 +332,7 @@ def build_package(
         DeckBuildReportInput(
             output_apkg=output_apkg,
             report_path=report_path,
+            migrator_addon_output=migrator_addon_output,
             master_db_output=master_db_output,
             enriched_db_output=enriched_db_output,
             source_database_report=enriched_state_result.source_database_report,

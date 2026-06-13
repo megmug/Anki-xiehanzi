@@ -17,6 +17,7 @@ from anki_hanzi.deck.build import (
     DEFAULT_GENERATED_ZIP_DATETIME,
     DEFAULT_GENANKI_TIMESTAMP,
     DEFAULT_HSK_DATA_DIR,
+    DEFAULT_MIGRATOR_ADDON_OUTPUT,
     DEFAULT_REPORT_PATH,
     DEFAULT_SNAPSHOT_MANIFEST,
     build_package,
@@ -63,6 +64,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=None, help="Output APKG path.")
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH, help="Output build report JSON path.")
     parser.add_argument(
+        "--migrator-addon-output",
+        type=Path,
+        default=DEFAULT_MIGRATOR_ADDON_OUTPUT,
+        help="Output Anki Hanzi Migrator add-on package path.",
+    )
+    parser.add_argument(
         "--timestamp",
         type=float,
         default=DEFAULT_GENANKI_TIMESTAMP,
@@ -108,6 +115,7 @@ def main() -> int:
         deck_config_path=args.config,
         output_apkg=output_apkg,
         report_path=args.report,
+        migrator_addon_output=args.migrator_addon_output,
         timestamp=args.timestamp,
         deterministic_zip=args.deterministic_zip,
         zip_generated_datetime=args.zip_generated_datetime,

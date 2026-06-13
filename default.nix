@@ -231,6 +231,41 @@ let
       && !(pkgs.lib.any hasPathSegment excludedDirNames)
       && !(type != "directory" && isGeneratedFile);
   };
+  gitMetadataSource = pkgs.lib.cleanSourceWith {
+    name = "anki-hanzi-git-metadata";
+    src = ./.;
+    filter =
+      path: type:
+      let
+        rel = relPath path;
+      in
+      (type == "directory" || type == "regular" || type == "symlink")
+      && (
+        rel == ""
+        || rel == ".git"
+        || rel == ".git/HEAD"
+        || rel == ".git/packed-refs"
+        || rel == ".git/refs"
+        || pkgs.lib.hasPrefix ".git/refs/" rel
+        || rel == ".git/objects"
+        || pkgs.lib.hasPrefix ".git/objects/" rel
+      );
+  };
+  knownBuildIdsFile =
+    pkgs.runCommandLocal "anki-hanzi-known-build-ids"
+      {
+        nativeBuildInputs = [ pkgs.git ];
+        src = gitMetadataSource;
+      }
+      ''
+        if git -c safe.directory="$src" -C "$src" rev-parse --git-dir >/dev/null 2>&1; then
+          if ! git -c safe.directory="$src" -C "$src" rev-list --first-parent --reverse --abbrev-commit --abbrev=7 "${gitCommit}" > "$out"; then
+            printf '%s\n' "${resolvedBuildId}" > "$out"
+          fi
+        else
+          printf '%s\n' "${resolvedBuildId}" > "$out"
+        fi
+      '';
 
   hanzi-apkg = pkgs.stdenvNoCC.mkDerivation {
     pname = "anki-hanzi-custom-apkg";
@@ -276,6 +311,7 @@ let
             export SSL_CERT_FILE="${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
             export REQUESTS_CA_BUNDLE="$SSL_CERT_FILE"
             export ANKI_HANZI_BUILD_ID="${resolvedBuildId}"
+            export ANKI_HANZI_KNOWN_BUILD_IDS="$(cat ${knownBuildIdsFile})"
             AUDIO_ENGINE="${normalizedDeckAudioEngine}"
             echo "=== deck audio engine: $AUDIO_ENGINE ==="
             echo "=== pip CUDA PyTorch: ${if enableCudaPip then "auto/probe" else "disabled"} ==="
@@ -412,13 +448,12 @@ let
 
       mkdir -p "$out"
       cp "anki-hanzi.apkg" "$out/anki-hanzi-${resolvedBuildId}.apkg"
+      cp "anki-hanzi-migrator.ankiaddon" "$out/anki-hanzi-migrator-${resolvedBuildId}.ankiaddon"
       cp build_reports/build_report.json "$out/"
       if [ -d master_db_output ]; then
         mkdir -p "$out/diagnostics"
         find master_db_output -maxdepth 1 -type f -name '*.json' -exec cp {} "$out/diagnostics/" \;
       fi
-      find tooling/utilities -maxdepth 1 -type f -name 'migrate-*.py' -exec cp {} "$out/" \;
-
       runHook postInstall
     '';
   };

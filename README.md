@@ -18,8 +18,8 @@ Compared with upstream, this fork currently:
 - packages HanziWriter and the required stroke data for offline Write cards, including scoring and configurable recognition leniency;
 - makes Pinyin and Meaning cards generally more usable, fair, and less redundant;
 - bakes deck display settings into the generated templates instead of exposing the old xiehanzi sidebar toggles inside Anki;
-- keeps customization possible by rebuilding the deck with custom options and then using the migration script to import it into Anki, which is more robust than the original xiehanzi approach;
-- allows upgrading the deck to newer versions or other configurations through a migration script that you paste into the Anki debug console, covering a workflow Anki does not handle well by default;
+- keeps customization possible by rebuilding the deck with custom options and then using the migrator add-on to import it into Anki, which is more robust than the original xiehanzi approach;
+- allows upgrading the deck to newer versions or other configurations through a bundled migrator add-on with preflight checks and a final verification report, covering a workflow Anki does not handle well by default;
 - can optionally generate audio with Kokoro or edge-tts, but defaults to an audio-free build;
 - builds from a much more reproducible Python/Nix pipeline and CI release workflow.
 
@@ -59,7 +59,7 @@ If no NVIDIA driver is available, or on macOS, the build uses CPU PyTorch.
 Audio builds that need network access for model downloads may require a relaxed Nix sandbox configuration.
 
 `nix-build` creates the default `result` symlink.
-The build result contains the hash-named APKG, one stage-oriented `build_report.json`, and any checked-in migration scripts.
+The build result contains the hash-named APKG, a matching hash-named migrator add-on, and one stage-oriented `build_report.json`.
 
 ## Repository Layout
 
@@ -82,23 +82,19 @@ Then run `nix-build`, review the changed data and generated APKG, and commit the
 
 ## Migrating from a Previous Version
 
-Each release that changes deck identity includes a migration script under `tooling/utilities/`.
-The script name is `migrate-<hash>.py`, where `<hash>` is the short commit hash of the **previous** version you are upgrading from.
-
-Example: to upgrade a deck built from commit `e7eeb8e` to the current version, use `tooling/utilities/migrate-e7eeb8e.py`.
+Each build includes a stateless Anki add-on named `anki-hanzi-migrator-<hash>.ankiaddon`, where `<hash>` is the target build ID.
+Install that add-on in Anki when you want to migrate an existing Hanzi deck to the matching APKG.
 
 ### How to migrate
 
-1. **Build the new APKG**: run `nix-build` in this repo and keep the `result/` symlink, or download the new deck with default settings from GitHub Releases.
-2. **Backup your Anki collection**: export a full `.colpkg` from the profile that contains your current deck.
-3. **Adjust the script**: open the migration script and edit the values in the `CONFIGURATION` block at the top:
-   - `APKG_PATH` — absolute path to the newly built/downloaded APKG.
-   - `DECK_ROOT` — the name of the deck root in your existing Anki collection.
-   - `TARGET_PRESET_NAME` — the deck options preset to apply (if unsure, check which preset your current deck uses and use that value).
-4. **Test in a throw-away profile**: copy the script contents into Anki's *Debug Console* (Help → Debug Console) and run it. Inspect the report.
-5. **Verify**: check deck name, note types, suspended cards, review counts, and deck preset before syncing.
+1. **Build the new artifacts**: run `nix-build` in this repo and keep the `result/` symlink, or download the APKG and matching migrator add-on from GitHub Releases.
+2. **Install the migrator add-on**: in Anki, install the generated `.ankiaddon` file.
+3. **Backup your Anki collection**: export a full `.colpkg` from the profile that contains your current deck.
+4. **Run the preflight**: use *Tools → Migrate Anki Hanzi Deck...*, select the existing deck root, select the target APKG, and choose the deck options preset to apply.
+5. **Apply only after preflight passes**: review the preflight report, confirm that you have a full backup, and then apply the migration.
+6. **Verify**: check deck name, note types, suspended cards, review counts, and deck preset before syncing.
 
-The migration script:
+The migrator add-on:
 - snapshots scheduler state + review history from your old deck,
 - deletes the old deck root,
 - imports the new APKG,
@@ -106,12 +102,6 @@ The migration script:
 - matches only learned/touched old cards to new cards by stable NoteID/GUID where possible and by controlled loose keys when card identity changed,
 - copies full scheduler state, suspended state, and revlog for those learned cards,
 - leaves untouched generated cards in their default suspended state.
-
-### Keeping migration scripts
-
-Migration scripts are kept permanently in `tooling/utilities/`.
-When you later upgrade to a newer commit, use the matching `migrate-<hash>.py` for the commit you are upgrading from.
-You might need to migrate multiple times in a row, using the appropriate migration scripts, to catch up to the latest version.
 
 ## Safety
 

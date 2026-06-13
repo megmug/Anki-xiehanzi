@@ -12,7 +12,7 @@ nix-build
 
 `default.nix` invokes one build entry point during the normal APKG build.
 
-- `build/generate_hanzi_deck.py`: build the typed lexicon state and generate the APKG.
+- `build/generate_hanzi_deck.py`: build the typed lexicon state, generate the APKG, and package the migrator add-on.
   The build writes one stage-oriented `build_reports/build_report.json` with source, enrichment, matching, selection,
   audio, HanziWriter, and package summaries.
   Full diagnostic lexicon JSON dumps are off by default; pass `--master-db-output` and/or `--enriched-db-output`
@@ -24,15 +24,15 @@ nix-build
 These programs are run manually for maintenance, analysis, or upgrades.
 
 - `utilities/diff_apkg.py`: compare two APKG files semantically and write a Markdown diff report.
-- `utilities/migrate-*.py`: stateful Anki Debug Console migration scripts.
-  A filename `migrate-<old-hash>.py` migrates from that old build hash to the target APKG it is released with.
+- `utilities/anki_hanzi_migrator/`: stateless Anki add-on that plans a BuildID migration route and migrates a selected
+  existing Hanzi deck through step-specific preflight/apply/result phases to a selected target APKG.
 - `utilities/update_cc_cedict_snapshot.py`: refresh the pinned CC-CEDICT snapshot when an intentional source-data update is needed.
 
 ## Formatting
 
 Run `nix-shell --run "treefmt"` to format maintained Python and Nix code.
 Treefmt uses Ruff for Python and nixfmt for Nix.
-Generated migration scripts and vendored deck inputs are excluded.
+Vendored deck inputs are excluded.
 
 ## Library
 

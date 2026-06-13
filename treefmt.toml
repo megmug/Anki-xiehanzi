@@ -8,7 +8,7 @@ options = ["format"]
 includes = [
   "tooling/build/*.py",
   "tooling/lib/**/*.py",
+  "tooling/utilities/anki_hanzi_migrator/**/*.py",
   "tooling/utilities/diff_apkg.py",
   "tooling/utilities/update_cc_cedict_snapshot.py",
 ]
-excludes = ["tooling/utilities/migrate-*.py"]
