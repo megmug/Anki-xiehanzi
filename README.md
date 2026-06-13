@@ -90,8 +90,8 @@ Install that add-on in Anki when you want to migrate an existing Hanzi deck to t
 1. **Build the new artifacts**: run `nix-build` in this repo and keep the `result/` symlink, or download the APKG and matching migrator add-on from GitHub Releases.
 2. **Install the migrator add-on**: in Anki, install the generated `.ankiaddon` file.
 3. **Backup your Anki collection**: export a full `.colpkg` from the profile that contains your current deck.
-4. **Run the preflight**: use *Tools → Migrate Anki Hanzi Deck...*, select the existing deck root, select the target APKG, and choose the deck options preset to apply.
-5. **Apply only after preflight passes**: review the preflight report, confirm that you have a full backup, and then apply the migration.
+4. **Run the migrator**: use *Tools → Anki Hanzi Migrator → Migrate Deck...*, select the existing deck root, and choose the target APKG.
+5. **Review the route and preflight**: select any intermediate APKGs requested by the route planner, then review each preflight dialog before applying the step.
 6. **Verify**: check deck name, note types, suspended cards, review counts, and deck preset before syncing.
 
 The migrator add-on:

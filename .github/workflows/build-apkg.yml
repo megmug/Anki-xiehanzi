@@ -67,8 +67,11 @@ jobs:
             echo
             echo "Release names use a UTC timestamp plus the target build hash."
             echo "APKG and migrator add-on filenames keep the plain target build hash."
-            echo "Install the add-on in Anki, open Tools -> Migrate Anki Hanzi Deck...,"
-            echo "select the APKG, review preflight, and apply only after a full backup."
+            echo "Install the migrator add-on in Anki, create a full collection backup,"
+            echo "then open Tools -> Anki Hanzi Migrator -> Migrate Deck..."
+            echo "Select the existing deck root and target APKG, review the required"
+            echo "package list and each preflight dialog, and apply only when the add-on"
+            echo "reports that the migration step is safe."
           } > ci-artifacts/README.md
 
       - name: Upload APKG artifacts
