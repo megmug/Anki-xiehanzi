@@ -8,7 +8,7 @@ This fork keeps the parts needed for my own Mandarin study deck and has diverged
 
 Compared with upstream, this fork currently:
 
-- builds an APKG from the current CC-CEDICT snapshot, with the default config selecting the New HSK (2025) / HSK 3.0 word list;
+- builds an APKG from the current CC-CEDICT snapshot; by default it selects all levels of the pinned HSK 3.0 / New HSK late-2025 word-list revision used for the current 2026 deck, plus the top 10,000 Mandarin frequency words;
 - generates only the active Meaning, Pinyin, and Write card families, without sentence cards or a separate audio-only card type;
 - keeps note fields deliberately small: Simplified, Pinyin, Meaning, Audio, NoteID, and BuildID;
 - adds tags such as `hanzi::hsk::1` and `hanzi::freq::top2500`, and uses one subdeck per card type;
