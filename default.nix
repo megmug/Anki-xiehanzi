@@ -289,6 +289,7 @@ let
       espeak-ng
       ffmpeg
       nixfmt
+      prettier
       ruff
       treefmt
     ];

@@ -1,153 +1,180 @@
 <div id="char_pinyin">{{Pinyin}}</div>
 <div id="char_sim" class="char-card">{{Simplified}}</div>
-<div id='audio' style='display:none'>{{Audio}}</div>
+<div id="audio" style="display: none">{{Audio}}</div>
 
 <div class="modal-footer1">
-    <a class="btn" id='btnPlayAudio'>
-        <div class="icon">
-            <span class="material-symbols-outlined">play_arrow</span>
-        </div>
-    </a>
-    <a class="btn" id='btnMoreOptions' onclick="openSidebar('more-info-sidebar')">
-        <div class="icon">
-            <span class="material-symbols-outlined">more_vert</span>
-        </div>
-    </a>
+  <a class="btn" id="btnPlayAudio">
+    <div class="icon">
+      <span class="material-symbols-outlined">play_arrow</span>
+    </div>
+  </a>
+  <a class="btn" id="btnMoreOptions" onclick="openSidebar('more-info-sidebar')">
+    <div class="icon">
+      <span class="material-symbols-outlined">more_vert</span>
+    </div>
+  </a>
 </div>
 
-<hr>
+<hr />
 
 <div id="char_meaning" class="meaning-card">{{Meaning}}</div>
 
 <script>
-    window.HANZI_CARD_SETTINGS = __HANZI_CARD_SETTINGS__;
+  window.HANZI_CARD_SETTINGS = __HANZI_CARD_SETTINGS__;
 
-    function collectAudioElements() {
-        var audioDiv = document.getElementById('audio');
-        if (!audioDiv) return [];
-        var allChildren = audioDiv.getElementsByTagName("*");
-        var audioElements = [];
-        for (var i = 0; i < allChildren.length; i++) {
-            var tag = allChildren[i].tagName;
-            if (tag === "AUDIO" || tag === "A") {
-                audioElements.push(allChildren[i]);
-            }
-        }
-        return audioElements;
+  function collectAudioElements() {
+    var audioDiv = document.getElementById("audio");
+    if (!audioDiv) return [];
+    var allChildren = audioDiv.getElementsByTagName("*");
+    var audioElements = [];
+    for (var i = 0; i < allChildren.length; i++) {
+      var tag = allChildren[i].tagName;
+      if (tag === "AUDIO" || tag === "A") {
+        audioElements.push(allChildren[i]);
+      }
     }
+    return audioElements;
+  }
 
-    function playAudio() {
-        var audioElements = collectAudioElements();
-        if (audioElements.length === 0) return;
+  function playAudio() {
+    var audioElements = collectAudioElements();
+    if (audioElements.length === 0) return;
 
-        function playNext(index) {
-            if (index >= audioElements.length) return;
-            var el = audioElements[index];
-            if (el.tagName === "AUDIO") {
-                el.onended = function() {
-                    playNext(index + 1);
-                };
-                el.play();
-            } else {
-                el.click();
-                // Anki <a> sound links have no onended event; chain with a fixed delay
-                setTimeout(function() {
-                    playNext(index + 1);
-                }, 1500);
-            }
-        }
-        playNext(0);
-    }
-
-    function setupAudioButton() {
-        var button = document.getElementById("btnPlayAudio");
-        if (!button) return;
-        if (collectAudioElements().length === 0) {
-            button.style.display = "none";
-            return;
-        }
-        button.onclick = function () {
-            playAudio();
+    function playNext(index) {
+      if (index >= audioElements.length) return;
+      var el = audioElements[index];
+      if (el.tagName === "AUDIO") {
+        el.onended = function () {
+          playNext(index + 1);
         };
+        el.play();
+      } else {
+        el.click();
+        // Anki <a> sound links have no onended event; chain with a fixed delay
+        setTimeout(function () {
+          playNext(index + 1);
+        }, 1500);
+      }
     }
+    playNext(0);
+  }
 
-    function showHide(selector, isShow, style) {
-        document.querySelectorAll(selector).forEach(function (element) {
-            element.style.display = isShow ? (style || "inline") : "none";
-        });
+  function setupAudioButton() {
+    var button = document.getElementById("btnPlayAudio");
+    if (!button) return;
+    if (collectAudioElements().length === 0) {
+      button.style.display = "none";
+      return;
     }
+    button.onclick = function () {
+      playAudio();
+    };
+  }
 
-    function openSidebar(id) {
-        var sidebar = document.getElementById(id);
-        if (sidebar) {
-            sidebar.style.width = "160px";
-        }
-    }
-
-    function closeSidebar(id) {
-        var sidebar = document.getElementById(id);
-        if (sidebar) {
-            sidebar.style.width = "0";
-        }
-    }
-
-    function applyCardSettings() {
-        var settings = (window.HANZI_CARD_SETTINGS && window.HANZI_CARD_SETTINGS.back) || {};
-        showHide("#char_pinyin", settings.show_pinyin);
-        showHide("#char_meaning", settings.show_meaning, "block");
-        showHide("#char_sim", settings.show_simplified, "block");
-        showHide(".pinyin", settings.show_pinyin);
-        showHide("#char-sim-id", settings.show_simplified);
-    }
-
-    document.addEventListener('click', function (event) {
-        var moreInfoSidebar = document.getElementById("more-info-sidebar");
-        var moreInfoButton = document.getElementById("btnMoreOptions");
-        if (!moreInfoSidebar || !moreInfoButton) { return };
-
-        if (!moreInfoSidebar.contains(event.target)) {
-            closeSidebar("more-info-sidebar");
-        }
-
-        if (moreInfoButton.contains(event.target)) {
-            openSidebar("more-info-sidebar");
-        }
+  function showHide(selector, isShow, style) {
+    document.querySelectorAll(selector).forEach(function (element) {
+      element.style.display = isShow ? style || "inline" : "none";
     });
+  }
 
-    setupAudioButton();
-    applyCardSettings();
+  function openSidebar(id) {
+    var sidebar = document.getElementById(id);
+    if (sidebar) {
+      sidebar.style.width = "160px";
+    }
+  }
+
+  function closeSidebar(id) {
+    var sidebar = document.getElementById(id);
+    if (sidebar) {
+      sidebar.style.width = "0";
+    }
+  }
+
+  function applyCardSettings() {
+    var settings =
+      (window.HANZI_CARD_SETTINGS && window.HANZI_CARD_SETTINGS.back) || {};
+    showHide("#char_pinyin", settings.show_pinyin);
+    showHide("#char_meaning", settings.show_meaning, "block");
+    showHide("#char_sim", settings.show_simplified, "block");
+    showHide(".pinyin", settings.show_pinyin);
+    showHide("#char-sim-id", settings.show_simplified);
+  }
+
+  document.addEventListener("click", function (event) {
+    var moreInfoSidebar = document.getElementById("more-info-sidebar");
+    var moreInfoButton = document.getElementById("btnMoreOptions");
+    if (!moreInfoSidebar || !moreInfoButton) {
+      return;
+    }
+
+    if (!moreInfoSidebar.contains(event.target)) {
+      closeSidebar("more-info-sidebar");
+    }
+
+    if (moreInfoButton.contains(event.target)) {
+      openSidebar("more-info-sidebar");
+    }
+  });
+
+  setupAudioButton();
+  applyCardSettings();
 </script>
 <div id="more-info-sidebar" class="more-info-sidebar">
-    <a class="fieldset-item tappable">
-        <div class="more-side-brand">
-            <div class="brand-title">汉字</div>
-            <div class="brand-sub-title">anki-hanzi {{BuildID}}</div>
-        </div>
-        <div onclick="closeSidebar('more-info-sidebar')" class="close-button close2">✖</div>
-    </a>
-    <a class="fieldset-item tappable" id="plecoMobile" href="plecoapi://x-callback-url/df?hw={{Simplified}}">
-        <img src="_pleco.png"></img>
-        <small>Pleco</small>
-    </a>
-    <a class="fieldset-item tappable" href="http://dict.youdao.com/search?q={{Simplified}}">
-        <img src="_youdao.png"></img>
-        <small>Youdao</small>
-    </a>
-    <a class="fieldset-item tappable" href="https://hanzicraft.com/character/{{Simplified}}">
-        <img src="_hanzicraft.png"></img>
-        <small>HanziCraft</small>
-    </a>
-    <a class="fieldset-item tappable" href="https://characterpop.com/characters/{{Simplified}}">
-        <img src="_characterpop.svg"></img>
-        <small>CharacterPop</small>
-    </a>
-    <a class="fieldset-item tappable" href="http://rtega.be/chmn/index.php?c={{Simplified}}">
-        <img src="_rtega.png"></img>
-        <small>Rtega</small>
-    </a>
-    <a class="fieldset-item tappable" href="https://tatoeba.org/en/sentences/search?from=cmn&query={{Simplified}}&to=">
-        <img src="_tatoeba.png"></img>
-        <small>Tatoeba</small>
-    </a>
+  <a class="fieldset-item tappable">
+    <div class="more-side-brand">
+      <div class="brand-title">汉字</div>
+      <div class="brand-sub-title">anki-hanzi {{BuildID}}</div>
+    </div>
+    <div
+      onclick="closeSidebar('more-info-sidebar')"
+      class="close-button close2"
+    >
+      ✖
+    </div>
+  </a>
+  <a
+    class="fieldset-item tappable"
+    id="plecoMobile"
+    href="plecoapi://x-callback-url/df?hw={{Simplified}}"
+  >
+    <img src="_pleco.png" />
+    <small>Pleco</small>
+  </a>
+  <a
+    class="fieldset-item tappable"
+    href="http://dict.youdao.com/search?q={{Simplified}}"
+  >
+    <img src="_youdao.png" />
+    <small>Youdao</small>
+  </a>
+  <a
+    class="fieldset-item tappable"
+    href="https://hanzicraft.com/character/{{Simplified}}"
+  >
+    <img src="_hanzicraft.png" />
+    <small>HanziCraft</small>
+  </a>
+  <a
+    class="fieldset-item tappable"
+    href="https://characterpop.com/characters/{{Simplified}}"
+  >
+    <img src="_characterpop.svg" />
+    <small>CharacterPop</small>
+  </a>
+  <a
+    class="fieldset-item tappable"
+    href="http://rtega.be/chmn/index.php?c={{Simplified}}"
+  >
+    <img src="_rtega.png" />
+    <small>Rtega</small>
+  </a>
+  <a
+    class="fieldset-item tappable"
+    href="https://tatoeba.org/en/sentences/search?from=cmn&query={{Simplified}}&to="
+  >
+    <img src="_tatoeba.png" />
+    <small>Tatoeba</small>
+  </a>
 </div>
 <!-----sidebar------>

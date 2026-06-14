@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from anki_hanzi.deck import common
@@ -10,6 +11,7 @@ from anki_hanzi.deck.config import DeckConfig
 
 
 HANZI_WRITER_BUNDLE_MARKER = "/*! Hanzi Writer v"
+HANZI_WRITER_BUNDLE_PATTERN = re.compile(rf"(?m)^(?P<indent>[ \t]*){re.escape(HANZI_WRITER_BUNDLE_MARKER)}")
 HANZI_WRITER_DATA_BUNDLE_MARKER = "<!-- __HANZI_WRITER_DATA_BUNDLE__ -->"
 
 
@@ -48,18 +50,19 @@ def remove_optional_template_marker(template: str, marker: str, label: str) -> s
 
 
 def inject_hanzi_writer_bundle(template: str) -> str:
-    start_marker = f"    {HANZI_WRITER_BUNDLE_MARKER}"
-    script_start = template.find(start_marker)
-    if script_start < 0:
+    bundle_match = HANZI_WRITER_BUNDLE_PATTERN.search(template)
+    if bundle_match is None:
         raise ValueError("Could not find embedded Hanzi Writer bundle start marker")
 
+    script_start = bundle_match.start()
+    indent = bundle_match.group("indent")
     script_end_marker = "\n</script>"
     script_end = template.find(script_end_marker, script_start)
     if script_end < 0:
         raise ValueError("Could not find embedded Hanzi Writer bundle end marker")
 
     injected_bundle = read_hanzi_writer_bundle()
-    indented_bundle = "\n".join(f"    {line}" if line else "" for line in injected_bundle.splitlines())
+    indented_bundle = "\n".join(f"{indent}{line}" if line else "" for line in injected_bundle.splitlines())
     return template[:script_start] + indented_bundle + template[script_end:]
 
 

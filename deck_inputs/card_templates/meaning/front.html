@@ -1,26 +1,29 @@
-<div class="header">Name one <span class="question-sub-text">meaning</span>.</div>
+<div class="header">
+  Name one <span class="question-sub-text">meaning</span>.
+</div>
 
-<br>
+<br />
 
 <div id="char_pinyin">{{Pinyin}}</div>
 <div id="char_sim" class="char-card">{{Simplified}}</div>
 
 <script>
-    window.HANZI_CARD_SETTINGS = __HANZI_CARD_SETTINGS__;
+  window.HANZI_CARD_SETTINGS = __HANZI_CARD_SETTINGS__;
 
-    (function () {
-        var settings = (window.HANZI_CARD_SETTINGS && window.HANZI_CARD_SETTINGS.front) || {};
+  (function () {
+    var settings =
+      (window.HANZI_CARD_SETTINGS && window.HANZI_CARD_SETTINGS.front) || {};
 
-        function showHide(selector, isShow, style) {
-            document.querySelectorAll(selector).forEach(function (element) {
-                element.style.display = isShow ? (style || "inline") : "none";
-            });
-        }
+    function showHide(selector, isShow, style) {
+      document.querySelectorAll(selector).forEach(function (element) {
+        element.style.display = isShow ? style || "inline" : "none";
+      });
+    }
 
-        showHide("#char_pinyin", settings.show_pinyin);
-        showHide("#char_meaning", settings.show_meaning, "block");
-        showHide("#char_sim", settings.show_simplified, "block");
-        showHide(".pinyin", settings.show_pinyin);
-        showHide("#char-sim-id", settings.show_simplified);
-    })();
+    showHide("#char_pinyin", settings.show_pinyin);
+    showHide("#char_meaning", settings.show_meaning, "block");
+    showHide("#char_sim", settings.show_simplified, "block");
+    showHide(".pinyin", settings.show_pinyin);
+    showHide("#char-sim-id", settings.show_simplified);
+  })();
 </script>

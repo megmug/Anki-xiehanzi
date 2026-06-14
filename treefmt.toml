@@ -12,3 +12,11 @@ includes = [
   "tooling/utilities/diff_apkg.py",
   "tooling/utilities/update_cc_cedict_snapshot.py",
 ]
+
+[formatter.prettier]
+command = "prettier"
+options = ["--write"]
+includes = [
+  "deck_inputs/card_templates/**/*.html",
+  "deck_inputs/card_templates/*.css",
+]
