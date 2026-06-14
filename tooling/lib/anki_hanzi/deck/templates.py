@@ -10,7 +10,7 @@ from anki_hanzi.deck import common
 from anki_hanzi.deck.config import DeckConfig
 
 
-HANZI_WRITER_BUNDLE_MARKER = "/*! Hanzi Writer v"
+HANZI_WRITER_BUNDLE_MARKER = "/* __HANZI_WRITER_BUNDLE__ */"
 HANZI_WRITER_BUNDLE_PATTERN = re.compile(rf"(?m)^(?P<indent>[ \t]*){re.escape(HANZI_WRITER_BUNDLE_MARKER)}")
 HANZI_WRITER_DATA_BUNDLE_MARKER = "<!-- __HANZI_WRITER_DATA_BUNDLE__ -->"
 
