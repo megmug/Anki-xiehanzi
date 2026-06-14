@@ -178,6 +178,13 @@ let
     hash = "sha256-wasqEk25KjOyWe8b8FN5OFqFhqE41UD6+6w+0Qxmkvc=";
   };
 
+  materialSymbolsRev = "5d5d1fdd5476f3df3749e9fb872e32021ec7a750";
+  materialSymbolsOutlinedFont = pkgs.fetchurl {
+    name = "MaterialSymbolsOutlined.woff2";
+    url = "https://raw.githubusercontent.com/google/material-design-icons/${materialSymbolsRev}/variablefont/MaterialSymbolsOutlined%5BFILL%2CGRAD%2Copsz%2Cwght%5D.woff2";
+    sha256 = "0xy6dnrf1ijkipcfc5lnz87zfjcj2m8m2dmvgb328hakngq3yzjd";
+  };
+
   root = toString ./.;
   relPath =
     path:
@@ -315,6 +322,10 @@ let
             AUDIO_ENGINE="${normalizedDeckAudioEngine}"
             echo "=== deck audio engine: $AUDIO_ENGINE ==="
             echo "=== pip CUDA PyTorch: ${if enableCudaPip then "auto/probe" else "disabled"} ==="
+            echo "=== material symbols: google/material-design-icons ${materialSymbolsRev} ==="
+
+            install -Dm644 ${materialSymbolsOutlinedFont} \
+              deck_inputs/card_templates/fonts/_MaterialSymbolsOutlined.woff2
 
             # Isolate the optional CUDA PyTorch wheel so it does not clash with Nix python.
             PYTHON_VERSION=$(python --version 2>&1 | cut -d' ' -f2 | cut -d'.' -f1,2)

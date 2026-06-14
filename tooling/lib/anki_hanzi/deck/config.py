@@ -120,8 +120,7 @@ class DeckConfig:
 
     def static_media(self) -> list[str]:
         return [
-            str(common.CARD_TEMPLATES_DIR / "fonts/_MaterialIcons-Regular.woff"),
-            str(common.CARD_TEMPLATES_DIR / "fonts/_MaterialIcons-Regular.woff2"),
+            str(common.CARD_TEMPLATES_DIR / "fonts/_MaterialSymbolsOutlined.woff2"),
             str(common.CARD_TEMPLATES_DIR / "files/_pleco.png"),
             str(common.CARD_TEMPLATES_DIR / "files/_youdao.png"),
             str(common.CARD_TEMPLATES_DIR / "files/_rtega.png"),

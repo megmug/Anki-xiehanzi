@@ -62,11 +62,16 @@ MIT License
 Copyright (c) 2018 Simon Lammer.
 <br>https://github.com/SimonLammer/anki-persistence
 
-## Google Material Design Icons
+## Google Material Symbols and Material Design Icons
 
-Apache License
-Version 2.0, January 2004
+The card templates bundle `_MaterialSymbolsOutlined.woff2`, fetched at build
+time from the pinned `google/material-design-icons` revision in `default.nix`.
+
+Google Material Symbols and Material Design Icons are licensed under the Apache
+License, Version 2.0.
+
 https://github.com/google/material-design-icons
+https://www.apache.org/licenses/LICENSE-2.0
 
 ## Logo Icons
 
