@@ -147,7 +147,6 @@ Write settings:
 - `stroke_width`: integer from `2` to `100`, default `64`
 - `hint_after_misses`: integer from `0` to `10`, default `0`
 - `stroke_leniency`: number from `0.1` to `2.0`, default `0.8`
-- `easy_score_min`: integer from `0` to `100`, default `95`
 
 Example `card_settings` override:
 
@@ -169,8 +168,7 @@ Example `card_settings` override:
         "grid_size": 400,
         "stroke_width": 64,
         "hint_after_misses": 0,
-        "stroke_leniency": 0.8,
-        "easy_score_min": 95
+        "stroke_leniency": 0.8
       }
     }
   }

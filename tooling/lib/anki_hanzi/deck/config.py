@@ -71,7 +71,6 @@ DEFAULT_CARD_SETTINGS: dict[str, dict[str, dict[str, Any]]] = {
             "stroke_width": 64,
             "hint_after_misses": 0,
             "stroke_leniency": 0.8,
-            "easy_score_min": 95,
         },
         "back": {
             "show_pinyin": True,
@@ -84,7 +83,6 @@ DEFAULT_CARD_SETTINGS: dict[str, dict[str, dict[str, Any]]] = {
             "stroke_width": 64,
             "hint_after_misses": 0,
             "stroke_leniency": 0.8,
-            "easy_score_min": 95,
         },
     },
 }
@@ -275,8 +273,6 @@ def normalize_card_setting(value: Any, field_name: str) -> Any:
         return parse_int(value, field_name, 2, 100)
     if field_name.endswith(".hint_after_misses"):
         return parse_int(value, field_name, 0, 10)
-    if field_name.endswith(".easy_score_min"):
-        return parse_int(value, field_name, 0, 100)
     if field_name.endswith(".stroke_leniency"):
         return parse_float(value, field_name, 0.1, 2.0)
     return parse_bool(value, field_name)

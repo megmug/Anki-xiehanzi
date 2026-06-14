@@ -369,8 +369,15 @@
         }
     }
 
-    function getQuizScoreSuggestion(score) {
-        if (score >= WRITE_SETTINGS.easy_score_min) {
+    function getQuizScoreSuggestion(state) {
+        var score = Number(state.score) || 0;
+        var isPerfect =
+            score >= 100 &&
+            (Number(state.totalStrokes) || 0) > 0 &&
+            Number(state.correctStrokes) === Number(state.totalStrokes) &&
+            (Number(state.mistakes) || 0) === 0 &&
+            (Number(state.assists) || 0) === 0;
+        if (isPerfect) {
             return { label: "Easy", className: "xh-score-easy" };
         }
         if (score >= 75) {
@@ -387,7 +394,7 @@
     }
 
     function renderQuizScoreState(state) {
-        var suggestion = getQuizScoreSuggestion(state.score);
+        var suggestion = getQuizScoreSuggestion(state);
         var panel = document.getElementById("xh-score-panel");
         var isBack = !!document.getElementById("back");
         var isRevealed = isBack || state.isComplete;
