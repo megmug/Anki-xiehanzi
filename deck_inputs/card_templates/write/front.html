@@ -41,11 +41,29 @@
     #back #btnMoreOptions {
         display: inline-block;
     }
+
+    #back #btnHintStroke {
+        display: none;
+    }
+
+    #btnHintStroke svg {
+        display: block;
+        width: 24px;
+        height: 24px;
+        fill: currentColor;
+    }
 </style>
 
 <div class="modal-footer1">
     <a class="btn" id='btnPlayAudio'>
         <div class="icon"><i class="material-icons">play_arrow</i></div>
+    </a>
+    <a class="btn" id='btnHintStroke' title="Hint" aria-label="Hint">
+        <div class="icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M9 21h6v-2H9v2Zm3-19a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2Zm2.2 11.1-.9.6V15h-2.6v-1.3l-.9-.6A5 5 0 1 1 14.2 13.1Z" />
+            </svg>
+        </div>
     </a>
     <a class="btn" id='btnRevealChar' style="display:none">
         <div class="icon">
@@ -422,12 +440,14 @@
 
     function createQuizScoreTracker(characterCount) {
         var mistakePenaltyStrokeRatio = 0.8;
-        var assistPenalty = 20;
+        var revealAssistPenalty = 20;
+        var hintPenaltyStrokeRatio = 1.2;
         var totalStrokesByChar = [];
         var correctStrokesByChar = [];
         var hintedStrokes = {};
         var mistakes = 0;
-        var assists = 0;
+        var revealAssists = 0;
+        var hintAssists = 0;
         var isComplete = false;
 
         for (var i = 0; i < characterCount; i++) {
@@ -451,7 +471,9 @@
             var baseScore = totalStrokes ? (correctStrokes / totalStrokes) * 100 : 0;
             var pointsPerStroke = totalStrokes ? 100 / totalStrokes : 0;
             var mistakePenalty = pointsPerStroke * mistakePenaltyStrokeRatio;
-            var score = clampScore(baseScore - mistakes * mistakePenalty - assists * assistPenalty);
+            var assistPenalty = revealAssists * revealAssistPenalty + hintAssists * pointsPerStroke * hintPenaltyStrokeRatio;
+            var assists = revealAssists + hintAssists;
+            var score = clampScore(baseScore - mistakes * mistakePenalty - assistPenalty);
             var state = {
                 score: score,
                 correctStrokes: correctStrokes,
@@ -484,7 +506,7 @@
                 updateDisplay();
             },
             markAssist: function () {
-                assists++;
+                revealAssists++;
                 updateDisplay();
             },
             markComplete: function () {
@@ -495,9 +517,18 @@
                 var key = characterIndex + ":" + strokeNum;
                 if (!hintedStrokes[key]) {
                     hintedStrokes[key] = true;
-                    assists++;
+                    hintAssists++;
                     updateDisplay();
                 }
+            },
+            getCurrentStroke: function (characterIndex) {
+                return correctStrokesByChar[characterIndex] || 0;
+            },
+            getTotalStrokes: function (characterIndex) {
+                return totalStrokesByChar[characterIndex] || 0;
+            },
+            isComplete: function () {
+                return isComplete;
             }
         };
     }
@@ -633,6 +664,26 @@
             };
         }
 
+        var hintButton = document.getElementById("btnHintStroke");
+        if (hintButton) {
+            hintButton.onclick = function () {
+                var currentIndex = getCurrentHanziNum();
+                var writer = hanziWriterList[currentIndex];
+                if (!writer || quizScore.isComplete()) {
+                    return;
+                }
+
+                var strokeNum = quizScore.getCurrentStroke(currentIndex);
+                if (strokeNum >= quizScore.getTotalStrokes(currentIndex)) {
+                    return;
+                }
+
+                btnTapAudio();
+                quizScore.markHint(currentIndex, strokeNum);
+                writer.highlightStroke(strokeNum);
+            };
+        }
+
         function writerQuiz(writer, characterIndex) {
             writer.quiz({
                 onMistake: function (data) {
@@ -712,6 +763,7 @@
             }
         }
 
+        showHide("#btnHintStroke", false);
         playAudio();
         showHide("#char_sim", true, "block");
         showHide("#char_meaning", true, "block");
