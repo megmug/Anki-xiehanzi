@@ -734,11 +734,12 @@ hr {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  touch-action: none;
 }
 
 #character-target-div svg {
-  max-width: min(100%, calc(100vw - 2rem));
-  height: auto;
+  display: block;
+  touch-action: none;
 }
 
 #character-target-div > div {
