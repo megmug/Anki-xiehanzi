@@ -89,13 +89,12 @@ def inject_card_settings(template: str, card_type: str, config: DeckConfig) -> s
     return template.replace("__HANZI_CARD_SETTINGS__", config.card_settings_json(card_type))
 
 
-def read_template(
+def render_template_text(
     card_type: str,
-    path: str | Path,
+    template: str,
     config: DeckConfig,
     hw_data_bundle: Path | None = None,
 ) -> str:
-    template = read_text(path)
     template = inject_card_settings(template, card_type, config)
     if card_type == "Write" and HANZI_WRITER_BUNDLE_MARKER in template:
         template = inject_hanzi_writer_bundle(template)

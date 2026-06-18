@@ -99,36 +99,6 @@ class DeckConfig:
     card_settings: dict[str, dict[str, dict[str, Any]]] = field(default_factory=default_card_settings)
     selection: DeckSelection = field(default_factory=DeckSelection)
 
-    def template_files(self, card_type: str) -> tuple[Path, Path]:
-        mapping = {
-            "Meaning": (
-                common.CARD_TEMPLATES_DIR / "meaning/front.html",
-                common.CARD_TEMPLATES_DIR / "meaning/back.html",
-            ),
-            "Pinyin": (
-                common.CARD_TEMPLATES_DIR / "pinyin/front.html",
-                common.CARD_TEMPLATES_DIR / "pinyin/back.html",
-            ),
-            "Write": (
-                common.CARD_TEMPLATES_DIR / "write/front.html",
-                common.CARD_TEMPLATES_DIR / "write/back.html",
-            ),
-        }
-        if card_type not in mapping:
-            raise ValueError(f"unknown card type: {card_type}")
-        return mapping[card_type]
-
-    def static_media(self) -> list[str]:
-        return [
-            str(common.CARD_TEMPLATES_DIR / "fonts/_MaterialSymbolsOutlined.woff2"),
-            str(common.CARD_TEMPLATES_DIR / "files/_pleco.png"),
-            str(common.CARD_TEMPLATES_DIR / "files/_youdao.png"),
-            str(common.CARD_TEMPLATES_DIR / "files/_rtega.png"),
-            str(common.CARD_TEMPLATES_DIR / "files/_tatoeba.png"),
-            str(common.CARD_TEMPLATES_DIR / "files/_hanzicraft.png"),
-            str(common.CARD_TEMPLATES_DIR / "files/_characterpop.svg"),
-        ]
-
     def card_settings_json(self, card_type: str) -> str:
         return json.dumps(
             self.card_settings.get(card_type, {}),

@@ -25,6 +25,7 @@ from anki_hanzi.deck.hanzi_writer import build_hanzi_writer_bundle, is_writable_
 from anki_hanzi.deck.migrator_addon import build_migrator_addon
 from anki_hanzi.deck.models import create_models
 from anki_hanzi.deck.reports import DeckBuildReportInput, build_deck_report
+from anki_hanzi.deck.template_generation import HanziTemplateGenerator
 from anki_hanzi.enrichment import xiehanzi as xiehanzi_enrichment
 from anki_hanzi.json_io import write_json
 from anki_hanzi.lexicon import ENRICHED_LEXICON_SCHEMA, LexiconState
@@ -305,7 +306,7 @@ def build_package(
         zip_datetime=zip_generated_datetime or DEFAULT_ZIP_DATETIME,
     )
 
-    static_media = config.static_media()
+    static_media = HanziTemplateGenerator().static_media()
     audio_result = audio_generator.generate(audio_jobs)
 
     # Build hanzi-writer JS bundle for offline Write deck usage

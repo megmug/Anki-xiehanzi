@@ -326,7 +326,7 @@ let
             echo "=== material symbols: google/material-design-icons ${materialSymbolsRev} ==="
 
             install -Dm644 ${materialSymbolsOutlinedFont} \
-              deck_inputs/card_templates/fonts/_MaterialSymbolsOutlined.woff2
+              tooling/lib/anki_hanzi/deck/template_resources/fonts/_MaterialSymbolsOutlined.woff2
 
             # Isolate the optional CUDA PyTorch wheel so it does not clash with Nix python.
             PYTHON_VERSION=$(python --version 2>&1 | cut -d' ' -f2 | cut -d'.' -f1,2)

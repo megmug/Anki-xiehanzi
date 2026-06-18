@@ -13,7 +13,7 @@ from anki_hanzi.deck import identity
 DECK_ROOT = "汉字 (Hànzì)"
 OUTPUT_APKG = Path("anki-hanzi.apkg")
 DECK_INPUTS_DIR = Path("deck_inputs")
-CARD_TEMPLATES_DIR = DECK_INPUTS_DIR / "card_templates"
+TEMPLATE_RESOURCES_DIR = Path("tooling/lib/anki_hanzi/deck/template_resources")
 EXTRA_AUDIO_DIR = DECK_INPUTS_DIR / "extra_audio"
 HANZI_WRITER_PACKAGE_JSON = Path("node_modules/hanzi-writer/package.json")
 HANZI_WRITER_BUNDLE = Path("node_modules/hanzi-writer/dist/hanzi-writer.min.js")
