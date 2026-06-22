@@ -13,20 +13,30 @@
 
   function generateHanziOnFinishQuiz(style = "none", finish = false) {
     var drawGrid = document.getElementById("onfinish-character-target-div");
+    if (!drawGrid) {
+      return;
+    }
     drawGrid.innerHTML = "";
     drawGrid.style = "";
-    drawGrid.style.position = "absolute";
-    drawGrid.style.display = "grid";
     var size = 40;
     if (finish) {
       size = 100;
       drawGrid.style.position = "unset";
-      drawGrid.style.display = "block";
-      drawGrid.style.whiteSpace = "nowrap";
-      drawGrid.style.overflow = "scroll";
+      drawGrid.style.display = "flex";
+      drawGrid.style.justifyContent = "center";
+      drawGrid.style.flexWrap = "nowrap";
+      drawGrid.style.overflow = "auto";
+    } else {
+      var half = (parseInt(charWidth, 10) || 200) / 2;
+      drawGrid.style.position = "absolute";
+      drawGrid.style.left = "0";
+      drawGrid.style.width = "calc(50% - " + half + "px)";
+      drawGrid.style.display = "flex";
+      drawGrid.style.flexDirection = "column";
+      drawGrid.style.alignItems = "flex-end";
     }
 
-    for (i = 0; i < characters.length; i++) {
+    for (var i = 0; i < characters.length; i++) {
       var hanzi = characters[i];
       var span = document.createElement("span");
       if (isHanzi(hanzi)) {

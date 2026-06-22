@@ -14,7 +14,7 @@
     showHide(".pinyin", WRITE_SETTINGS.show_pinyin);
     showHide("#char-sim-id", WRITE_SETTINGS.show_simplified);
 
-    characters = document.getElementById("char_sim").innerHTML;
+    characters = document.getElementById("char_sim").textContent;
   }
 
   /* __SHARED_SIDEBAR__ */
