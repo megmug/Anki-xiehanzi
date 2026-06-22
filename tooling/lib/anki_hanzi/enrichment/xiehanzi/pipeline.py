@@ -25,6 +25,7 @@ from anki_hanzi.enrichment.frequency import (
     TOP_FREQUENCY_THRESHOLDS,
     apply_frequency_enrichment_to_state,
 )
+from anki_hanzi.enrichment.erhua import apply_erhua_definition_enrichment_to_state
 from anki_hanzi.enrichment.xiehanzi.buckets import (
     bucket_definitions_by_phase,
     bucket_definitions_by_priority,
@@ -282,6 +283,7 @@ def enrich_state(
     synthetic_words = pipeline_enrichment["synthetic_words"]
     form_stats = pipeline_enrichment["form_stats"]
     frequency_enrichment = apply_frequency_enrichment_to_state(master_state, frequency_list_path)
+    erhua_definition_enrichment = apply_erhua_definition_enrichment_to_state(master_state)
     master_state.hanzi_dropped_duplicates = dropped_duplicates
 
     enrichment_metadata = LexiconEnrichmentMetadata(
@@ -303,6 +305,7 @@ def enrich_state(
         missing_deck_entries=missing_deck_entries,
         form_stats=form_stats,
         frequency_enrichment=frequency_enrichment,
+        erhua_definition_enrichment=erhua_definition_enrichment,
     )
     enriched = master_state.to_enriched_json(
         base=base_snapshot,
@@ -317,6 +320,7 @@ def enrich_state(
         matching_report=matching_report,
         pipeline_enrichment=pipeline_enrichment,
         frequency_enrichment=frequency_enrichment,
+        erhua_definition_enrichment=erhua_definition_enrichment,
         missing_raw_entries=missing_raw_entries,
         missing_deck_entries=missing_deck_entries,
         synthetic_words=synthetic_words,

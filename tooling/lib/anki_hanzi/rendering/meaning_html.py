@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
-import re
 import html
 
+from anki_hanzi.lexicon.definitions import (
+    DefinitionItem,
+    ErhuaVariantDefinition,
+    definition_display_texts,
+    split_definition_text,
+)
 from anki_hanzi.lexicon import LexiconForm, LexiconWord
 from anki_hanzi.pinyin import numbered_to_display, pinyin_syllables, tone_from_numbered_syllable
 from colorize_pinyin import colorized_HTML_string_from_string
@@ -39,16 +44,37 @@ def colored_characters(value: str, pinyin: str) -> str:
 
 
 def rendered_definitions(form: LexiconForm) -> list[str]:
-    definitions: list[str] = []
+    return definition_display_texts(form.definition_items)
+
+
+def render_definition_item(item: DefinitionItem) -> str:
+    children = getattr(item, "resolved_definitions", [])
+    if not children:
+        return html.escape(item.text, quote=False)
+
+    output = [html.escape(item.text, quote=False), ' <ul class="derived-definitions derived-definitions--erhua">']
+    for child in children:
+        for part in split_definition_text(child.text):
+            output.append(f"  <li>{html.escape(part, quote=False)}</li>")
+    output.append(" </ul>")
+    return "".join(output)
+
+
+def render_definition_items(form: LexiconForm) -> list[str]:
+    rendered: list[str] = []
     seen: set[str] = set()
-    for definition in form.definitions:
-        for part in re.split(r";\s*", str(definition)):
-            value = part.strip()
-            if not value or value in seen:
+    for item in form.definition_items:
+        if isinstance(item, ErhuaVariantDefinition) and item.resolved_definitions:
+            rendered.append(render_definition_item(item))
+            seen.update(split_definition_text(item.text))
+            continue
+
+        for part in split_definition_text(item.text):
+            if part in seen:
                 continue
-            definitions.append(value)
-            seen.add(value)
-    return definitions
+            seen.add(part)
+            rendered.append(html.escape(part, quote=False))
+    return rendered
 
 
 def render_meaning_form(word: LexiconWord, form: LexiconForm) -> str:
@@ -69,8 +95,8 @@ def render_meaning_form(word: LexiconWord, form: LexiconForm) -> str:
             " <ul>",
         ]
     )
-    for definition in rendered_definitions(form):
-        output.append(f"  <li>{html.escape(definition, quote=False)}</li>")
+    for definition in render_definition_items(form):
+        output.append(f"  <li>{definition}</li>")
     output.append(" </ul>  ")
     return "".join(output)
 

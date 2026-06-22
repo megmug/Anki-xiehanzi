@@ -308,6 +308,7 @@ def build_enrichment_summary(
     missing_deck_entries: list[dict[str, Any]],
     form_stats: dict[str, Any],
     frequency_enrichment: dict[str, Any],
+    erhua_definition_enrichment: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "base_words": len(base_words),
@@ -338,6 +339,12 @@ def build_enrichment_summary(
         "hanzi_pinyin_substantive": len(form_stats["pinyin_substantive"]),
         "frequency_tags_by_word": frequency_enrichment["tagged_words_by_threshold"],
         "frequency_tags_by_form": frequency_enrichment["tagged_forms_by_threshold"],
+        "erhua_variant_definitions": erhua_definition_enrichment["scanned_erhua_definitions"],
+        "erhua_variant_definitions_resolved": erhua_definition_enrichment["resolved_erhua_definitions"],
+        "erhua_variant_definitions_duplicate_only": erhua_definition_enrichment[
+            "duplicate_only_erhua_definitions"
+        ],
+        "erhua_variant_definitions_unresolved": erhua_definition_enrichment["unresolved_erhua_definitions"],
     }
 
 
@@ -349,6 +356,7 @@ def build_enrichment_report(
     matching_report: dict[str, Any],
     pipeline_enrichment: dict[str, Any],
     frequency_enrichment: dict[str, Any],
+    erhua_definition_enrichment: dict[str, Any],
     missing_raw_entries: list[dict[str, Any]],
     missing_deck_entries: list[dict[str, Any]],
     synthetic_words: list[Any],
@@ -367,6 +375,7 @@ def build_enrichment_report(
             if definition.name in pipeline_enrichment
         },
         "frequency_enrichment": frequency_enrichment,
+        "erhua_definition_enrichment": erhua_definition_enrichment,
         "samples": {
             "missing_raw_entries": [entry_summary(entry) for entry in missing_raw_entries[:25]],
             "missing_deck_entries": [entry_summary(entry) for entry in missing_deck_entries[:25]],

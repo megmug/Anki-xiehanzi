@@ -6,6 +6,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from anki_hanzi.lexicon.definitions import (
+    DefinitionItem,
+    definition_item_from_json,
+    definition_item_to_json,
+    definition_text,
+    parse_definitions,
+)
 from anki_hanzi.pinyin import normalize_single_pinyin, sorted_pinyin_readings, split_pinyin_readings
 
 
@@ -111,6 +118,7 @@ class LexiconForm:
     pinyin_readings: list[str] = field(default_factory=list)
     definitions: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
+    definition_items: list[DefinitionItem] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         primary_reading = normalize_single_pinyin(self.pinyin)
@@ -118,6 +126,12 @@ class LexiconForm:
         all_readings = ([primary_reading] if primary_reading else []) + extra_readings
         self.pinyin = primary_reading or (extra_readings[0] if extra_readings else "")
         self.pinyin_readings = sorted_pinyin_readings(all_readings)
+        self.definitions = [str(definition) for definition in self.definitions]
+        if self.definition_items:
+            self.definition_items = list(self.definition_items)
+            self.definitions = [definition_text(item) for item in self.definition_items]
+        else:
+            self.definition_items = parse_definitions(self.definitions)
         self.tags = normalized_tags(self.tags)
 
     def replace_pinyin(self, value: str) -> None:
@@ -151,6 +165,7 @@ class LexiconForm:
             if definition in seen:
                 continue
             self.definitions.append(definition)
+            self.definition_items.extend(parse_definitions([definition]))
             seen.add(definition)
 
     def add_tags(self, tags: list[str]) -> None:
@@ -168,6 +183,8 @@ class LexiconForm:
             "pinyin": self.pinyin,
             "tags": list(self.tags),
         }
+        if any(getattr(item, "resolved_definitions", []) for item in self.definition_items):
+            data["definition_items"] = [definition_item_to_json(item) for item in self.definition_items]
         if len(self.pinyin_readings) > 1:
             data["pinyin_readings"] = list(self.pinyin_readings)
         return data
@@ -188,6 +205,11 @@ class LexiconForm:
             pinyin_readings=pinyin_readings,
             definitions=[str(value) for value in data.get("definitions", [])],
             tags=[str(value) for value in data.get("tags", [])],
+            definition_items=[
+                definition_item_from_json(value)
+                for value in data.get("definition_items", [])
+                if isinstance(value, (dict, str))
+            ],
         )
 
 

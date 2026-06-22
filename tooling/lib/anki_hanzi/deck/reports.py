@@ -124,6 +124,7 @@ def build_deck_report(data: DeckBuildReportInput) -> dict[str, Any]:
                 },
                 "pipeline_enrichment": data.enrichment_report["pipeline_enrichment"],
                 "frequency_enrichment": data.enrichment_report["frequency_enrichment"],
+                "erhua_definition_enrichment": data.enrichment_report["erhua_definition_enrichment"],
                 "samples": selected_enrichment_samples(data.enrichment_report["samples"]),
             },
             "deck_selection": {
