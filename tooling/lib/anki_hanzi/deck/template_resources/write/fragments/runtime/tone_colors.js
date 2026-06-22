@@ -33,16 +33,30 @@
   function setStrokeColor(i) {
     var pinyinText = "{{Pinyin}}";
     var pinyinDiv = document.getElementById("char_pinyin");
+    if (!pinyinDiv) {
+      return;
+    }
     var colorizeHTML = pinyinWrapper().colorized_HTML_string_from_string(
       pinyinText,
       "pinYinWrapper",
       ["tone0", "tone1", "tone2", "tone3", "tone4"],
     );
-    pinyinDiv.innerHTML = colorizeHTML;
-    var charClass = document.querySelector(".pinYinWrapper").children;
+    if (colorizeHTML) {
+      pinyinDiv.innerHTML = colorizeHTML;
+    } else {
+      pinyinDiv.textContent = pinyinText;
+    }
+    var pinyinWrapperElement = document.querySelector(".pinYinWrapper");
+    if (!pinyinWrapperElement || !pinyinWrapperElement.children[i]) {
+      return;
+    }
+    var charClass = pinyinWrapperElement.children;
 
     if (WRITE_SETTINGS.stroke_tone_color) {
       var toneColor = getToneColor(charClass[i].className);
+      if (!toneColor) {
+        return;
+      }
       drawing_color = toneColor;
       stroke_color = toneColor;
     }
