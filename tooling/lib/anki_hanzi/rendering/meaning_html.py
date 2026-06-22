@@ -15,7 +15,12 @@ from anki_hanzi.pinyin import numbered_to_display, pinyin_syllables, tone_from_n
 from colorize_pinyin import colorized_HTML_string_from_string
 
 
-TONE_CLASSES = ["text-color5", "text-color1", "text-color2", "text-color3", "text-color4"]
+TONE_CLASSES = ["tone0", "tone1", "tone2", "tone3", "tone4"]
+
+
+def tone_class_from_numbered_syllable(value: str) -> str:
+    tone = tone_from_numbered_syllable(value)
+    return "tone0" if tone == 5 else f"tone{tone}"
 
 
 def pinyin_html(value: str) -> str:
@@ -27,7 +32,7 @@ def pinyin_html(value: str) -> str:
     )
     if colored is not None:
         return colored
-    return f'<span class="pinYinWrapper"><span class="text-color5">{display}</span></span>'
+    return f'<span class="pinYinWrapper"><span class="tone0">{display}</span></span>'
 
 
 def colored_characters(value: str, pinyin: str) -> str:
@@ -35,12 +40,12 @@ def colored_characters(value: str, pinyin: str) -> str:
     syllables = pinyin_syllables(pinyin)
     if len(characters) == len(syllables):
         return "".join(
-            f'<span class="text-color{tone_from_numbered_syllable(syllable)}">{character}</span>'
+            f'<span class="{tone_class_from_numbered_syllable(syllable)}">{character}</span>'
             for character, syllable in zip(characters, syllables)
         )
 
-    fallback_tone = tone_from_numbered_syllable(syllables[0]) if syllables else 5
-    return "".join(f'<span class="text-color{fallback_tone}">{character}</span>' for character in characters)
+    fallback_class = tone_class_from_numbered_syllable(syllables[0]) if syllables else "tone0"
+    return "".join(f'<span class="{fallback_class}">{character}</span>' for character in characters)
 
 
 def rendered_definitions(form: LexiconForm) -> list[str]:
