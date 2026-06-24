@@ -26,6 +26,11 @@ from anki_hanzi.enrichment.frequency import (
     apply_frequency_enrichment_to_state,
 )
 from anki_hanzi.enrichment.erhua import apply_erhua_definition_enrichment_to_state
+from anki_hanzi.enrichment.exam_lists import (
+    DEFAULT_YCT_DATA_DIR,
+    YCT_LEVELS,
+    apply_yct_enrichment_to_state,
+)
 from anki_hanzi.enrichment.xiehanzi.buckets import (
     bucket_definitions_by_phase,
     bucket_definitions_by_priority,
@@ -252,6 +257,7 @@ def enrich_state(
     output_path: Path | None,
     hsk_data_dir: Path,
     frequency_list_path: Path,
+    yct_data_dir: Path = DEFAULT_YCT_DATA_DIR,
 ) -> XiehanziEnrichmentResult:
     base_snapshot = LexiconBaseSnapshot.from_state(master_state)
     base_words = list(master_state.sorted_words())
@@ -283,6 +289,7 @@ def enrich_state(
     synthetic_words = pipeline_enrichment["synthetic_words"]
     form_stats = pipeline_enrichment["form_stats"]
     frequency_enrichment = apply_frequency_enrichment_to_state(master_state, frequency_list_path)
+    yct_enrichment = apply_yct_enrichment_to_state(master_state, yct_data_dir)
     erhua_definition_enrichment = apply_erhua_definition_enrichment_to_state(master_state)
     master_state.hanzi_dropped_duplicates = dropped_duplicates
 
@@ -292,6 +299,8 @@ def enrich_state(
         hsk_data_dir=hsk_data_dir,
         frequency_list=frequency_list_path,
         frequency_tags=tuple(f"freq:top{threshold}" for threshold in TOP_FREQUENCY_THRESHOLDS),
+        yct_data_dir=yct_data_dir,
+        yct_tags=tuple(f"yct:{level}" for level in YCT_LEVELS),
         dedupe_key=HANZI_DEDUPE_KEY,
     )
     summary = build_enrichment_summary(
@@ -305,6 +314,7 @@ def enrich_state(
         missing_deck_entries=missing_deck_entries,
         form_stats=form_stats,
         frequency_enrichment=frequency_enrichment,
+        yct_enrichment=yct_enrichment,
         erhua_definition_enrichment=erhua_definition_enrichment,
     )
     enriched = master_state.to_enriched_json(
@@ -320,6 +330,7 @@ def enrich_state(
         matching_report=matching_report,
         pipeline_enrichment=pipeline_enrichment,
         frequency_enrichment=frequency_enrichment,
+        yct_enrichment=yct_enrichment,
         erhua_definition_enrichment=erhua_definition_enrichment,
         missing_raw_entries=missing_raw_entries,
         missing_deck_entries=missing_deck_entries,
@@ -346,6 +357,7 @@ def enrich_database(
     output_path: Path,
     hsk_data_dir: Path,
     frequency_list_path: Path,
+    yct_data_dir: Path = DEFAULT_YCT_DATA_DIR,
 ) -> XiehanziEnrichmentResult:
     return enrich_state(
         master_state=load_master_state(master_db_path),
@@ -353,4 +365,5 @@ def enrich_database(
         output_path=output_path,
         hsk_data_dir=hsk_data_dir,
         frequency_list_path=frequency_list_path,
+        yct_data_dir=yct_data_dir,
     )
