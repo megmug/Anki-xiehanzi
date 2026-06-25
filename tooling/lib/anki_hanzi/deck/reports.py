@@ -70,6 +70,7 @@ def selected_enrichment_samples(samples: Mapping[str, Any]) -> dict[str, Any]:
 def build_deck_report(data: DeckBuildReportInput) -> dict[str, Any]:
     matching_summary = data.matching_report["summary"]
     enrichment_summary = data.enrichment_report["summary"]
+    hsk_report = data.enrichment_report["hsk_enrichment"]
     entries_by_card_type = {card_type: len(entries) for card_type, entries in data.entries_by_card_type.items()}
     total_words = _unique_word_count(data.all_entries)
     audio_files_packaged = len(data.media_files) - len(data.static_media)
@@ -107,22 +108,27 @@ def build_deck_report(data: DeckBuildReportInput) -> dict[str, Any]:
         "artifacts": artifacts,
         "stages": {
             "source_database": data.source_database_report,
-            "xiehanzi_enrichment": {
+            "lexicon_enrichment": {
                 "schema": data.enrichment_report["schema"],
                 "enriched_lexicon_schema": data.enriched_lexicon.get("schema"),
                 "input": data.enrichment_report["input"],
                 "output": data.enrichment_report.get("output"),
                 "summary": enrichment_summary,
-                "matching": {
-                    "schema": data.matching_report["schema"],
-                    "description": data.matching_report["description"],
-                    "summary": matching_summary,
-                    "bucket_summary": data.matching_report["bucket_summary"],
-                    "pair_materialization": data.matching_report["pair_materialization"],
-                    "candidate_generation": data.matching_report["candidate_generation"],
-                    "detailed_buckets": data.matching_report["buckets"],
+                "hsk_enrichment": {
+                    "schema": hsk_report["schema"],
+                    "input": hsk_report["input"],
+                    "summary": hsk_report["summary"],
+                    "matching": {
+                        "schema": data.matching_report["schema"],
+                        "description": data.matching_report["description"],
+                        "summary": matching_summary,
+                        "bucket_summary": data.matching_report["bucket_summary"],
+                        "pair_materialization": data.matching_report["pair_materialization"],
+                        "candidate_generation": data.matching_report["candidate_generation"],
+                        "detailed_buckets": data.matching_report["buckets"],
+                    },
+                    "pipeline_enrichment": hsk_report["pipeline_enrichment"],
                 },
-                "pipeline_enrichment": data.enrichment_report["pipeline_enrichment"],
                 "frequency_enrichment": data.enrichment_report["frequency_enrichment"],
                 "yct_enrichment": data.enrichment_report["yct_enrichment"],
                 "erhua_definition_enrichment": data.enrichment_report["erhua_definition_enrichment"],

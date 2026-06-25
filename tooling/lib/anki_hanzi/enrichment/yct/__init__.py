@@ -1,4 +1,4 @@
-"""Exam-list tag enrichment stages for the hanzi LexiconState."""
+"""YCT tag enrichment stage for the hanzi LexiconState."""
 
 from __future__ import annotations
 

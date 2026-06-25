@@ -26,17 +26,21 @@ from anki_hanzi.deck.migrator_addon import build_migrator_addon
 from anki_hanzi.deck.models import create_models
 from anki_hanzi.deck.reports import DeckBuildReportInput, build_deck_report
 from anki_hanzi.deck.template_generation import HanziTemplateGenerator
-from anki_hanzi.enrichment import xiehanzi as xiehanzi_enrichment
+from anki_hanzi.enrichment import (
+    DEFAULT_FREQUENCY_LIST as ENRICHMENT_DEFAULT_FREQUENCY_LIST,
+    DEFAULT_HSK_DATA_DIR as ENRICHMENT_DEFAULT_HSK_DATA_DIR,
+    DEFAULT_YCT_DATA_DIR as ENRICHMENT_DEFAULT_YCT_DATA_DIR,
+    HANZI_DEDUPE_KEY,
+    enrich_state,
+)
 from anki_hanzi.json_io import write_json
 from anki_hanzi.lexicon import ENRICHED_LEXICON_SCHEMA, LexiconState
 from anki_hanzi.lexicon.cc_cedict import load_cedict_state, load_snapshot_manifest, resolve_source_file
 
 
-DEFAULT_FREQUENCY_LIST = xiehanzi_enrichment.DEFAULT_FREQUENCY_LIST
-DEFAULT_HSK_DATA_DIR = xiehanzi_enrichment.DEFAULT_HSK_DATA_DIR
-HANZI_DEDUPE_KEY = xiehanzi_enrichment.HANZI_DEDUPE_KEY
-enrich_state = xiehanzi_enrichment.enrich_state
-
+DEFAULT_FREQUENCY_LIST = ENRICHMENT_DEFAULT_FREQUENCY_LIST
+DEFAULT_HSK_DATA_DIR = ENRICHMENT_DEFAULT_HSK_DATA_DIR
+DEFAULT_YCT_DATA_DIR = ENRICHMENT_DEFAULT_YCT_DATA_DIR
 DEFAULT_SNAPSHOT_MANIFEST = Path("deck_inputs/cc-cedict/snapshot.json")
 DEFAULT_DECK_CONFIG = Path("deck_inputs/deck_config.json")
 DEFAULT_AUDIO_EXCEPTIONS = Path("deck_inputs/audio_generation_exceptions.json")
@@ -214,6 +218,7 @@ def build_enriched_state(
     enriched_db_output: Path | None,
     hsk_data_dir: Path,
     frequency_list: Path,
+    yct_data_dir: Path,
 ) -> EnrichedStateBuildResult:
     manifest = load_snapshot_manifest(snapshot_manifest)
     resolved_source_file = resolve_source_file(snapshot_manifest, manifest, source_file)
@@ -236,6 +241,7 @@ def build_enriched_state(
         output_path=enriched_db_output,
         hsk_data_dir=hsk_data_dir,
         frequency_list_path=frequency_list,
+        yct_data_dir=yct_data_dir,
     )
     source_report = dict(master_json["source"])
     source_report["comment_header_lines"] = len(source_report.pop("comment_header", []))
@@ -264,6 +270,7 @@ def build_package(
     enriched_db_output: Path | None,
     hsk_data_dir: Path,
     frequency_list: Path,
+    yct_data_dir: Path,
     deck_config_path: Path | None,
     output_apkg: Path,
     report_path: Path,
@@ -286,6 +293,7 @@ def build_package(
         enriched_db_output=enriched_db_output,
         hsk_data_dir=hsk_data_dir,
         frequency_list=frequency_list,
+        yct_data_dir=yct_data_dir,
     )
     state = enriched_state_result.state
     entries_by_card_type, selection_report = build_entries_from_state(

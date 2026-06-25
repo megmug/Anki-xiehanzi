@@ -1,44 +1,26 @@
 """
-Enrich the CC-CEDICT lexicon state with xiehanzi deck-source data.
+Apply the xiehanzi New HSK source to the CC-CEDICT lexicon state.
 
-This module is part of the in-memory APKG build pipeline:
-
-    CC-CEDICT source + hanzi TSV files -> enriched LexiconState -> APKG
-
-The optional enriched JSON and report are diagnostic build artifacts.
+This module owns only the HSK/xiehanzi matching and state-consumption rules.
+Other enrichment stages, such as frequency and YCT tags, are orchestrated by
+the top-level enrichment pipeline.
 """
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from anki_hanzi.lexicon import (
-    LexiconBaseSnapshot,
-    LexiconEnrichmentMetadata,
-    LexiconState,
-)
-from anki_hanzi.enrichment.frequency import (
-    DEFAULT_FREQUENCY_LIST as DEFAULT_FREQUENCY_LIST,
-    TOP_FREQUENCY_THRESHOLDS,
-    apply_frequency_enrichment_to_state,
-)
-from anki_hanzi.enrichment.erhua import apply_erhua_definition_enrichment_to_state
-from anki_hanzi.enrichment.exam_lists import (
-    DEFAULT_YCT_DATA_DIR,
-    YCT_LEVELS,
-    apply_yct_enrichment_to_state,
-)
-from anki_hanzi.enrichment.xiehanzi.buckets import (
+from anki_hanzi.lexicon import LexiconState
+from anki_hanzi.enrichment.hsk.buckets import (
     bucket_definitions_by_phase,
     bucket_definitions_by_priority,
 )
-from anki_hanzi.enrichment.xiehanzi.consumption import (
+from anki_hanzi.enrichment.hsk.consumption import (
     apply_pipeline_enrichment_to_state,
 )
-from anki_hanzi.enrichment.xiehanzi.model import (
+from anki_hanzi.enrichment.hsk.model import (
     BucketResult,
     PairConsumption,
     PairPipelineResult,
@@ -50,35 +32,29 @@ from anki_hanzi.enrichment.xiehanzi.model import (
     pair_pipeline_bucket_result,
     source_prelude_bucket_result,
 )
-from anki_hanzi.enrichment.xiehanzi.source import (
-    HANZI_DEDUPE_KEY,
-    HANZI_FIELDS,
+from anki_hanzi.enrichment.hsk.source import (
     dedupe_entries,
     load_hanzi_entries,
 )
-from anki_hanzi.enrichment.xiehanzi.matching import (
+from anki_hanzi.enrichment.hsk.matching import (
     TargetFormRef,
     build_source_entry_reports,
     build_target_form_index,
     materialize_simplified_match_pairs,
 )
-from anki_hanzi.enrichment.xiehanzi.reports import (
+from anki_hanzi.enrichment.hsk.reports import (
     build_enrichment_report,
     build_enrichment_summary,
     build_matching_report,
 )
-from anki_hanzi.json_io import write_json
-
-
-DEFAULT_DECK_INPUTS_DIR = Path("deck_inputs")
-DEFAULT_HSK_DATA_DIR = DEFAULT_DECK_INPUTS_DIR / "hsk-3.0-words-list/New HSK (2025)/Anki xiehanzi"
 
 
 @dataclass(frozen=True)
-class XiehanziEnrichmentResult:
-    enriched: dict[str, Any]
+class HskEnrichmentResult:
     enrichment_report: dict[str, Any]
     matching_report: dict[str, Any]
+    summary: dict[str, Any]
+    dropped_duplicates: list[dict[str, Any]]
 
 
 def apply_source_prelude_rules(
@@ -251,15 +227,11 @@ def build_matching_pipeline(
     }
 
 
-def enrich_state(
+def apply_hsk_enrichment_to_state(
     master_state: LexiconState,
     input_label: str,
-    output_path: Path | None,
     hsk_data_dir: Path,
-    frequency_list_path: Path,
-    yct_data_dir: Path = DEFAULT_YCT_DATA_DIR,
-) -> XiehanziEnrichmentResult:
-    base_snapshot = LexiconBaseSnapshot.from_state(master_state)
+) -> HskEnrichmentResult:
     base_words = list(master_state.sorted_words())
     base_word_index = {word.simplified: word for word in master_state.sorted_words()}
 
@@ -288,21 +260,8 @@ def enrich_state(
     missing_deck_entries = pipeline_enrichment["missing_deck_entries"]
     synthetic_words = pipeline_enrichment["synthetic_words"]
     form_stats = pipeline_enrichment["form_stats"]
-    frequency_enrichment = apply_frequency_enrichment_to_state(master_state, frequency_list_path)
-    yct_enrichment = apply_yct_enrichment_to_state(master_state, yct_data_dir)
-    erhua_definition_enrichment = apply_erhua_definition_enrichment_to_state(master_state)
     master_state.hanzi_dropped_duplicates = dropped_duplicates
 
-    enrichment_metadata = LexiconEnrichmentMetadata(
-        name="hanzi New HSK (2025)",
-        fields=tuple(HANZI_FIELDS),
-        hsk_data_dir=hsk_data_dir,
-        frequency_list=frequency_list_path,
-        frequency_tags=tuple(f"freq:top{threshold}" for threshold in TOP_FREQUENCY_THRESHOLDS),
-        yct_data_dir=yct_data_dir,
-        yct_tags=tuple(f"yct:{level}" for level in YCT_LEVELS),
-        dedupe_key=HANZI_DEDUPE_KEY,
-    )
     summary = build_enrichment_summary(
         base_words=base_words,
         total_words=len(master_state.words),
@@ -313,25 +272,13 @@ def enrich_state(
         missing_raw_entries=missing_raw_entries,
         missing_deck_entries=missing_deck_entries,
         form_stats=form_stats,
-        frequency_enrichment=frequency_enrichment,
-        yct_enrichment=yct_enrichment,
-        erhua_definition_enrichment=erhua_definition_enrichment,
-    )
-    enriched = master_state.to_enriched_json(
-        base=base_snapshot,
-        enrichment=enrichment_metadata,
-        summary=summary,
     )
 
     report = build_enrichment_report(
         input_label=input_label,
-        output_path=output_path,
-        enriched=enriched,
+        summary=summary,
         matching_report=matching_report,
         pipeline_enrichment=pipeline_enrichment,
-        frequency_enrichment=frequency_enrichment,
-        yct_enrichment=yct_enrichment,
-        erhua_definition_enrichment=erhua_definition_enrichment,
         missing_raw_entries=missing_raw_entries,
         missing_deck_entries=missing_deck_entries,
         synthetic_words=synthetic_words,
@@ -339,31 +286,9 @@ def enrich_state(
         dropped_duplicates=dropped_duplicates,
     )
 
-    if output_path is not None:
-        write_json(output_path, enriched)
-    return XiehanziEnrichmentResult(
-        enriched=enriched,
+    return HskEnrichmentResult(
         enrichment_report=report,
         matching_report=matching_report,
-    )
-
-
-def load_master_state(master_db_path: Path) -> LexiconState:
-    return LexiconState.from_master_json(json.loads(master_db_path.read_text(encoding="utf-8")))
-
-
-def enrich_database(
-    master_db_path: Path,
-    output_path: Path,
-    hsk_data_dir: Path,
-    frequency_list_path: Path,
-    yct_data_dir: Path = DEFAULT_YCT_DATA_DIR,
-) -> XiehanziEnrichmentResult:
-    return enrich_state(
-        master_state=load_master_state(master_db_path),
-        input_label=str(master_db_path),
-        output_path=output_path,
-        hsk_data_dir=hsk_data_dir,
-        frequency_list_path=frequency_list_path,
-        yct_data_dir=yct_data_dir,
+        summary=summary,
+        dropped_duplicates=dropped_duplicates,
     )

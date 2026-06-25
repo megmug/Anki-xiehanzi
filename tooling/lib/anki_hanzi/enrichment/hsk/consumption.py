@@ -19,12 +19,12 @@ from anki_hanzi.pinyin import (
     pinyin_reading_in_reference_spacing,
     source_pinyin_in_dictionary_format,
 )
-from anki_hanzi.enrichment.xiehanzi.rule_helpers import (
+from anki_hanzi.enrichment.hsk.rule_helpers import (
     definition_sets_exact,
     definitions_from_meaning_html,
     pinyin_rule_kind,
 )
-from anki_hanzi.enrichment.xiehanzi.model import (
+from anki_hanzi.enrichment.hsk.model import (
     PairConsumption,
     PipelineItem,
     SourcePreludeConsumption,
@@ -32,7 +32,7 @@ from anki_hanzi.enrichment.xiehanzi.model import (
     bucket_source_form_ids,
     pair_source_form_id,
 )
-from anki_hanzi.enrichment.xiehanzi.source import entry_summary
+from anki_hanzi.enrichment.hsk.source import entry_summary
 
 
 SourcePreludeConsumptionHandler = Callable[[list[PipelineItem], set[int]], SourcePreludeConsumption]

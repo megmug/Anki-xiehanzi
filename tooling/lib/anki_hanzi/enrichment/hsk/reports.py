@@ -3,20 +3,19 @@
 from __future__ import annotations
 
 from collections import Counter
-from pathlib import Path
 from typing import Any
 
-from anki_hanzi.enrichment.xiehanzi.buckets import (
+from anki_hanzi.enrichment.hsk.buckets import (
     BUCKET_DEFINITIONS,
     BucketDefinition,
     bucket_definitions_by_priority,
 )
-from anki_hanzi.enrichment.xiehanzi.matching import (
+from anki_hanzi.enrichment.hsk.matching import (
     candidate_count_bucket,
     candidate_count_buckets_for_source_forms,
 )
-from anki_hanzi.enrichment.xiehanzi.model import bucket_matching_pair_count, bucket_source_form_ids
-from anki_hanzi.enrichment.xiehanzi.source import LEVELS, entry_summary
+from anki_hanzi.enrichment.hsk.model import bucket_matching_pair_count, bucket_source_form_ids
+from anki_hanzi.enrichment.hsk.source import LEVELS, entry_summary
 
 
 def selected_source_form_count_after_consumption(result: dict[str, Any], definition: BucketDefinition) -> int:
@@ -307,9 +306,6 @@ def build_enrichment_summary(
     missing_raw_entries: list[dict[str, Any]],
     missing_deck_entries: list[dict[str, Any]],
     form_stats: dict[str, Any],
-    frequency_enrichment: dict[str, Any],
-    yct_enrichment: dict[str, Any],
-    erhua_definition_enrichment: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "base_words": len(base_words),
@@ -338,32 +334,15 @@ def build_enrichment_summary(
         "hanzi_pinyin_case_preserved": len(form_stats["pinyin_case_preserved"]),
         "hanzi_pinyin_whitespace_only": len(form_stats["pinyin_whitespace_only"]),
         "hanzi_pinyin_substantive": len(form_stats["pinyin_substantive"]),
-        "frequency_tags_by_word": frequency_enrichment["tagged_words_by_threshold"],
-        "frequency_tags_by_form": frequency_enrichment["tagged_forms_by_threshold"],
-        "yct_source_terms": yct_enrichment["source_terms"],
-        "yct_matched_terms": yct_enrichment["matched_terms"],
-        "yct_unmatched_terms": yct_enrichment["unmatched_terms"],
-        "yct_tags_by_word": yct_enrichment["tagged_words_by_level"],
-        "yct_tags_by_form": yct_enrichment["tagged_forms_by_level"],
-        "erhua_variant_definitions": erhua_definition_enrichment["scanned_erhua_definitions"],
-        "erhua_variant_definitions_resolved": erhua_definition_enrichment["resolved_erhua_definitions"],
-        "erhua_variant_definitions_duplicate_only": erhua_definition_enrichment[
-            "duplicate_only_erhua_definitions"
-        ],
-        "erhua_variant_definitions_unresolved": erhua_definition_enrichment["unresolved_erhua_definitions"],
     }
 
 
 def build_enrichment_report(
     *,
     input_label: str,
-    output_path: Path | None,
-    enriched: dict[str, Any],
+    summary: dict[str, Any],
     matching_report: dict[str, Any],
     pipeline_enrichment: dict[str, Any],
-    frequency_enrichment: dict[str, Any],
-    yct_enrichment: dict[str, Any],
-    erhua_definition_enrichment: dict[str, Any],
     missing_raw_entries: list[dict[str, Any]],
     missing_deck_entries: list[dict[str, Any]],
     synthetic_words: list[Any],
@@ -371,19 +350,15 @@ def build_enrichment_report(
     dropped_duplicates: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
-        "schema": "hanzi-enrichment-report-v1",
+        "schema": "hanzi-hsk-enrichment-report-v1",
         "input": input_label,
-        "output": str(output_path) if output_path is not None else None,
-        "summary": enriched["summary"],
+        "summary": summary,
         "matching_summary": matching_report["summary"],
         "pipeline_enrichment": {
             definition.name: pipeline_report_item(pipeline_enrichment[definition.name])
             for definition in bucket_definitions_by_priority()
             if definition.name in pipeline_enrichment
         },
-        "frequency_enrichment": frequency_enrichment,
-        "yct_enrichment": yct_enrichment,
-        "erhua_definition_enrichment": erhua_definition_enrichment,
         "samples": {
             "missing_raw_entries": [entry_summary(entry) for entry in missing_raw_entries[:25]],
             "missing_deck_entries": [entry_summary(entry) for entry in missing_deck_entries[:25]],

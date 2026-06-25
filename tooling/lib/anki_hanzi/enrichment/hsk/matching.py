@@ -10,7 +10,7 @@ from typing import Any, cast
 
 from anki_hanzi.lexicon import LexiconForm, LexiconState, LexiconWord
 from anki_hanzi.pinyin import numbered_pinyin_token_pairs
-from anki_hanzi.enrichment.xiehanzi.rule_helpers import (
+from anki_hanzi.enrichment.hsk.rule_helpers import (
     definition_sets_exact,
     definitions_from_meaning_html,
     normalize_matching_definition,
@@ -18,7 +18,7 @@ from anki_hanzi.enrichment.xiehanzi.rule_helpers import (
     pinyin_rule_readings as pinyin_readings,
     strip_html_text,
 )
-from anki_hanzi.enrichment.xiehanzi.model import (
+from anki_hanzi.enrichment.hsk.model import (
     MatchingRuleResult,
     PairId,
     PipelineItem,
