@@ -101,6 +101,8 @@ class LexiconEnrichmentMetadata:
     frequency_tags: tuple[str, ...]
     yct_data_dir: Path
     yct_tags: tuple[str, ...]
+    bct_data_dir: Path
+    bct_tags: tuple[str, ...]
     dedupe_key: str
 
     def to_json(self) -> dict[str, Any]:
@@ -112,6 +114,8 @@ class LexiconEnrichmentMetadata:
             "frequency_tags": list(self.frequency_tags),
             "yct_data_dir": str(self.yct_data_dir),
             "yct_tags": list(self.yct_tags),
+            "bct_data_dir": str(self.bct_data_dir),
+            "bct_tags": list(self.bct_tags),
             "dedupe_key": self.dedupe_key,
         }
 

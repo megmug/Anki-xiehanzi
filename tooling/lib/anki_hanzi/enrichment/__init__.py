@@ -7,6 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from anki_hanzi.enrichment.bct import (
+    BCT_LEVELS,
+    DEFAULT_BCT_DATA_DIR,
+    apply_bct_enrichment_to_state,
+)
+from anki_hanzi.enrichment.erhua import apply_erhua_definition_enrichment_to_state
 from anki_hanzi.enrichment.frequency import (
     DEFAULT_FREQUENCY_LIST,
     TOP_FREQUENCY_THRESHOLDS,
@@ -28,7 +34,6 @@ from anki_hanzi.lexicon import (
     LexiconEnrichmentMetadata,
     LexiconState,
 )
-from anki_hanzi.enrichment.erhua import apply_erhua_definition_enrichment_to_state
 
 
 @dataclass(frozen=True)
@@ -43,6 +48,7 @@ def build_lexicon_enrichment_summary(
     hsk_summary: dict[str, Any],
     frequency_enrichment: dict[str, Any],
     yct_enrichment: dict[str, Any],
+    bct_enrichment: dict[str, Any],
     erhua_definition_enrichment: dict[str, Any],
 ) -> dict[str, Any]:
     return {
@@ -54,6 +60,11 @@ def build_lexicon_enrichment_summary(
         "yct_unmatched_terms": yct_enrichment["unmatched_terms"],
         "yct_tags_by_word": yct_enrichment["tagged_words_by_level"],
         "yct_tags_by_form": yct_enrichment["tagged_forms_by_level"],
+        "bct_source_terms": bct_enrichment["source_terms"],
+        "bct_matched_terms": bct_enrichment["matched_terms"],
+        "bct_unmatched_terms": bct_enrichment["unmatched_terms"],
+        "bct_tags_by_word": bct_enrichment["tagged_words_by_level"],
+        "bct_tags_by_form": bct_enrichment["tagged_forms_by_level"],
         "erhua_variant_definitions": erhua_definition_enrichment["scanned_erhua_definitions"],
         "erhua_variant_definitions_resolved": erhua_definition_enrichment["resolved_erhua_definitions"],
         "erhua_variant_definitions_duplicate_only": erhua_definition_enrichment[
@@ -71,6 +82,7 @@ def build_lexicon_enrichment_report(
     hsk_enrichment: dict[str, Any],
     frequency_enrichment: dict[str, Any],
     yct_enrichment: dict[str, Any],
+    bct_enrichment: dict[str, Any],
     erhua_definition_enrichment: dict[str, Any],
 ) -> dict[str, Any]:
     return {
@@ -81,6 +93,7 @@ def build_lexicon_enrichment_report(
         "hsk_enrichment": hsk_enrichment,
         "frequency_enrichment": frequency_enrichment,
         "yct_enrichment": yct_enrichment,
+        "bct_enrichment": bct_enrichment,
         "erhua_definition_enrichment": erhua_definition_enrichment,
         "samples": hsk_enrichment["samples"],
     }
@@ -93,6 +106,7 @@ def enrich_state(
     hsk_data_dir: Path,
     frequency_list_path: Path,
     yct_data_dir: Path,
+    bct_data_dir: Path,
 ) -> LexiconEnrichmentResult:
     base_snapshot = LexiconBaseSnapshot.from_state(master_state)
 
@@ -103,22 +117,26 @@ def enrich_state(
     )
     frequency_enrichment = apply_frequency_enrichment_to_state(master_state, frequency_list_path)
     yct_enrichment = apply_yct_enrichment_to_state(master_state, yct_data_dir)
+    bct_enrichment = apply_bct_enrichment_to_state(master_state, bct_data_dir)
     erhua_definition_enrichment = apply_erhua_definition_enrichment_to_state(master_state)
 
     summary = build_lexicon_enrichment_summary(
         hsk_summary=hsk_result.summary,
         frequency_enrichment=frequency_enrichment,
         yct_enrichment=yct_enrichment,
+        bct_enrichment=bct_enrichment,
         erhua_definition_enrichment=erhua_definition_enrichment,
     )
     enrichment_metadata = LexiconEnrichmentMetadata(
         name="hanzi lexicon enrichment",
-        fields=("hsk", "frequency", "yct", "erhua"),
+        fields=("hsk", "frequency", "yct", "bct", "erhua"),
         hsk_data_dir=hsk_data_dir,
         frequency_list=frequency_list_path,
         frequency_tags=tuple(f"freq:top{threshold}" for threshold in TOP_FREQUENCY_THRESHOLDS),
         yct_data_dir=yct_data_dir,
         yct_tags=tuple(f"yct:{level}" for level in YCT_LEVELS),
+        bct_data_dir=bct_data_dir,
+        bct_tags=tuple(f"bct:{level}" for level in BCT_LEVELS),
         dedupe_key=HANZI_DEDUPE_KEY,
     )
     enriched = master_state.to_enriched_json(
@@ -133,6 +151,7 @@ def enrich_state(
         hsk_enrichment=hsk_result.enrichment_report,
         frequency_enrichment=frequency_enrichment,
         yct_enrichment=yct_enrichment,
+        bct_enrichment=bct_enrichment,
         erhua_definition_enrichment=erhua_definition_enrichment,
     )
 
@@ -155,6 +174,7 @@ def enrich_database(
     hsk_data_dir: Path = DEFAULT_HSK_DATA_DIR,
     frequency_list_path: Path = DEFAULT_FREQUENCY_LIST,
     yct_data_dir: Path = DEFAULT_YCT_DATA_DIR,
+    bct_data_dir: Path = DEFAULT_BCT_DATA_DIR,
 ) -> LexiconEnrichmentResult:
     return enrich_state(
         master_state=load_master_state(master_db_path),
@@ -163,10 +183,12 @@ def enrich_database(
         hsk_data_dir=hsk_data_dir,
         frequency_list_path=frequency_list_path,
         yct_data_dir=yct_data_dir,
+        bct_data_dir=bct_data_dir,
     )
 
 
 __all__ = [
+    "DEFAULT_BCT_DATA_DIR",
     "DEFAULT_FREQUENCY_LIST",
     "DEFAULT_HSK_DATA_DIR",
     "DEFAULT_YCT_DATA_DIR",

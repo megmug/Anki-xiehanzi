@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 
 from anki_hanzi.deck import common
 from anki_hanzi.deck.build import (
+    DEFAULT_BCT_DATA_DIR,
     DEFAULT_DECK_CONFIG,
     DEFAULT_FREQUENCY_LIST,
     DEFAULT_GENERATED_ZIP_DATETIME,
@@ -62,6 +63,7 @@ def parse_args() -> argparse.Namespace:
         help="Simplified word frequency list sorted by usage.",
     )
     parser.add_argument("--yct-data-dir", type=Path, default=DEFAULT_YCT_DATA_DIR, help="Prepared YCT TSV directory.")
+    parser.add_argument("--bct-data-dir", type=Path, default=DEFAULT_BCT_DATA_DIR, help="Prepared BCT data directory.")
     parser.add_argument("--config", type=Path, default=DEFAULT_DECK_CONFIG, help="Deck selection JSON config.")
     parser.add_argument("--output", type=Path, default=None, help="Output APKG path.")
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH, help="Output build report JSON path.")
@@ -105,6 +107,9 @@ def main() -> int:
     if not args.yct_data_dir.exists():
         print(f"missing YCT data dir: {args.yct_data_dir}")
         return 2
+    if not args.bct_data_dir.exists():
+        print(f"missing BCT data dir: {args.bct_data_dir}")
+        return 2
 
     output_apkg = args.output
     if output_apkg is None:
@@ -118,6 +123,7 @@ def main() -> int:
         hsk_data_dir=args.hsk_data_dir,
         frequency_list=args.frequency_list,
         yct_data_dir=args.yct_data_dir,
+        bct_data_dir=args.bct_data_dir,
         deck_config_path=args.config,
         output_apkg=output_apkg,
         report_path=args.report,
