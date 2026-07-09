@@ -243,12 +243,7 @@ def normalize_numbered_pinyin_token_for_display(value: str) -> str:
 
 
 def numbered_to_display(value: str) -> str:
-    """Convert numbered Pinyin to the display form used by hanzi HTML.
-
-    Keep the inherited `r5` quirk intact. The old generated HTML renders erhua
-    finals as `<span ...>r</span>5`, so normalizing `r5` to plain `r` would
-    change cards that still need legacy-perfect output.
-    """
+    """Convert numbered Pinyin to the display form used by hanzi HTML."""
 
     parts: list[str] = []
     for part in re.split(r"(\s+)", value or ""):
@@ -256,7 +251,12 @@ def numbered_to_display(value: str) -> str:
             parts.append(part)
             continue
         if part.lower() == "r5":
-            parts.append(part.lower())
+            if parts and parts[-1].isspace():
+                parts.pop()
+            if parts:
+                parts[-1] = f"{parts[-1]}r"
+            else:
+                parts.append("r")
             continue
         if re.search(r"\d", part):
             try:
