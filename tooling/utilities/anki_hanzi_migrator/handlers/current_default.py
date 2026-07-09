@@ -607,6 +607,26 @@ def build_match_plan(source_by_key, target_by_key):
     }
 
 
+def special_match_source_keys(match_plan):
+    return [
+        key
+        for key, match in match_plan["matches_by_source_key"].items()
+        if match.get("match_type") not in {"exact", "loose"}
+    ]
+
+
+def special_match_type_counts(match_plan):
+    return dict(
+        sorted(
+            Counter(
+                match.get("match_type", "unknown")
+                for match in match_plan["matches_by_source_key"].values()
+                if match.get("match_type") not in {"exact", "loose"}
+            ).items()
+        )
+    )
+
+
 def extract_apkg_collection(apkg_path):
     if not os.path.exists(apkg_path):
         raise Exception(f"APKG_PATH does not exist: {apkg_path}")
@@ -890,7 +910,16 @@ def summarize_touch_reason_sets(records):
     return dict(sorted(Counter("+".join(touch_reasons(record)) or "none" for record in records).items()))
 
 
-def validate_preflight(source_info, target_preview_info, preset_id, *, apkg_path, old_root, imported_root):
+def validate_preflight(
+    source_info,
+    target_preview_info,
+    preset_id,
+    *,
+    apkg_path,
+    old_root,
+    imported_root,
+    match_plan_builder=build_match_plan,
+):
     source_records = source_info["records"]
     target_preview_records = target_preview_info["records"]
     source_by_key, source_duplicates, source_missing_key = index_by_key(source_records)
@@ -900,7 +929,7 @@ def validate_preflight(source_info, target_preview_info, preset_id, *, apkg_path
     touched_source_by_key = {key: record for key, record in source_by_key.items() if record.get("touched")}
     target_by_key, target_duplicates, target_missing_key = index_by_key(target_preview_records)
 
-    match_plan = build_match_plan(touched_source_by_key, target_by_key)
+    match_plan = match_plan_builder(touched_source_by_key, target_by_key)
     unmatched_source = [touched_source_by_key[key] for key in match_plan["unmatched_source_keys"]]
     touched_unmatched = unmatched_source
     touched_missing_key = [record for record in source_missing_key if record.get("touched")]
@@ -997,10 +1026,17 @@ def _kind_count_text(kind_counts: dict[str, dict[str, int]] | None) -> str:
     return "; ".join(parts) if parts else "no cards"
 
 
+def _match_type_counts_text(counts: dict[str, int] | None) -> str:
+    if not counts:
+        return "none"
+    return ", ".join(f"{match_type}: {count}" for match_type, count in sorted(counts.items()))
+
+
 def _card_label(card: dict[str, Any]) -> str:
     if "source" in card and "target" in card:
+        match_type = card.get("match_type")
         loose_key = card.get("loose_key")
-        suffix = f" via {loose_key}" if loose_key else ""
+        suffix = f" via {loose_key}" if loose_key else f" ({match_type})" if match_type else ""
         return f"{_summary_label(card['source'])} -> {_summary_label(card['target'])}{suffix}"
     if "summary" in card:
         return _summary_label(card["summary"])
@@ -1040,6 +1076,9 @@ class CurrentDefaultMigration(MigrationStepHandler):
     key = "current_default"
     name = "Current default migration"
     description = "Stateful NoteID/loose-key migration used by the current add-on."
+
+    def build_match_plan(self, source_by_key, target_by_key):
+        return build_match_plan(source_by_key, target_by_key)
 
     def deck_preset_name(self, deck_root: str) -> str | None:
         deck_ids = deck_ids_under(deck_root)
@@ -1167,6 +1206,7 @@ class CurrentDefaultMigration(MigrationStepHandler):
             apkg_path=apkg_path,
             old_root=old_root,
             imported_root=IMPORTED_ROOT,
+            match_plan_builder=self.build_match_plan,
         )
         source_records = source_info["records"]
         self._append_build_id_integrity_problems(
@@ -1177,6 +1217,7 @@ class CurrentDefaultMigration(MigrationStepHandler):
         learned_source_records = list(preflight["source_by_key"].values())
         touched_unmatched = preflight["touched_unmatched"]
         match_plan = preflight["match_plan"]
+        special_source_keys = special_match_source_keys(match_plan)
         problem_report = self._preflight_problem_report(preflight) if preflight["problems"] else {}
 
         report_data = {
@@ -1206,6 +1247,8 @@ class CurrentDefaultMigration(MigrationStepHandler):
             "match": {
                 "matched_learned_cards": len(match_plan["matched_source_keys"]),
                 "exact_matched_learned_cards": len(match_plan["exact_source_keys"]),
+                "special_matched_learned_cards": len(special_source_keys),
+                "special_match_type_counts": special_match_type_counts(match_plan),
                 "loose_matched_learned_cards": len(match_plan["loose_source_keys"]),
                 "touched_unmatched_cards": len(touched_unmatched),
                 "resolved_source_duplicate_keys": len(preflight["resolved_source_duplicates"]),
@@ -1224,6 +1267,7 @@ class CurrentDefaultMigration(MigrationStepHandler):
             f"learned/touched source cards: {len(learned_source_records)}",
             f"matched learned cards: {len(match_plan['matched_source_keys'])}",
             f"exact matches: {len(match_plan['exact_source_keys'])}",
+            f"special matches: {len(special_source_keys)}",
             f"loose matches: {len(match_plan['loose_source_keys'])}",
             f"touched unmatched cards: {len(touched_unmatched)}",
         ]
@@ -1261,6 +1305,7 @@ class CurrentDefaultMigration(MigrationStepHandler):
                 apkg_path=apkg_path,
                 old_root=old_root,
                 imported_root=IMPORTED_ROOT,
+                match_plan_builder=self.build_match_plan,
             )
 
             source_records = source_info["records"]
@@ -1316,7 +1361,7 @@ class CurrentDefaultMigration(MigrationStepHandler):
             if target_info["unknown_kind"]:
                 raise Exception(f"Unknown target kind after import: {len(target_info['unknown_kind'])}")
 
-            match_plan = build_match_plan(source_by_key, target_by_key)
+            match_plan = self.build_match_plan(source_by_key, target_by_key)
             matches_by_source_key = match_plan["matches_by_source_key"]
             matched_source_keys = match_plan["matched_source_keys"]
             touched_matched_source_keys = [key for key in matched_source_keys if key in source_snapshot]
@@ -1379,7 +1424,7 @@ class CurrentDefaultMigration(MigrationStepHandler):
             revlog_mismatches = []
             default_suspended_mismatches = []
 
-            final_match_plan = build_match_plan(source_by_key, final_by_key)
+            final_match_plan = self.build_match_plan(source_by_key, final_by_key)
             final_matches_by_source_key = final_match_plan["matches_by_source_key"]
 
             for source_key in touched_matched_source_keys:
@@ -1448,6 +1493,22 @@ class CurrentDefaultMigration(MigrationStepHandler):
                         "target": card_summary(final_by_key[final_match["target_key"]]),
                     }
                 )
+            special_match_samples = []
+            final_special_source_keys = sorted(special_match_source_keys(final_match_plan))
+            for source_key in final_special_source_keys:
+                final_match = final_matches_by_source_key[source_key]
+                special_match_samples.append(
+                    {
+                        "match_type": final_match.get("match_type"),
+                        "source": card_summary(source_by_key[source_key]),
+                        "target": card_summary(final_by_key[final_match["target_key"]]),
+                        "details": {
+                            key: value
+                            for key, value in final_match.items()
+                            if key not in {"source_key", "target_key", "match_type"}
+                        },
+                    }
+                )
 
             verify_problems = []
             if final_duplicates:
@@ -1501,6 +1562,8 @@ class CurrentDefaultMigration(MigrationStepHandler):
                 "match": {
                     "matched_learned_cards": len(matched_source_keys),
                     "exact_matched_learned_cards": len(match_plan["exact_source_keys"]),
+                    "special_matched_learned_cards": len(special_match_source_keys(match_plan)),
+                    "special_match_type_counts": special_match_type_counts(match_plan),
                     "loose_matched_learned_cards": len(match_plan["loose_source_keys"]),
                     "resolved_source_duplicate_keys": len(preflight["resolved_source_duplicates"]),
                     "default_only_target_cards": len(default_only_target_keys),
@@ -1536,6 +1599,7 @@ class CurrentDefaultMigration(MigrationStepHandler):
                     "resolved_source_duplicate_keys": [
                         item["key"] for item in preflight["resolved_source_duplicates"][:100]
                     ],
+                    "special_matches": special_match_samples,
                     "loose_matches": loose_match_samples,
                     "schedule_mismatches": schedule_mismatches[:20],
                     "revlog_mismatches": revlog_mismatches[:20],
@@ -1555,6 +1619,7 @@ class CurrentDefaultMigration(MigrationStepHandler):
                 status,
                 f"final root: {final_root}",
                 f"matched learned cards: {len(matched_source_keys)}",
+                f"special matches: {len(special_match_source_keys(match_plan))}",
                 f"loose matches: {len(match_plan['loose_source_keys'])}",
                 f"resolved duplicate source keys: {len(preflight['resolved_source_duplicates'])}",
                 f"full states copied: {full_state_copied}",
@@ -1618,6 +1683,7 @@ class CurrentDefaultMigration(MigrationStepHandler):
         learned_cards = source.get("learned_keyed_cards", 0)
         matched_cards = match.get("matched_learned_cards", 0)
         exact_cards = match.get("exact_matched_learned_cards", 0)
+        special_cards = match.get("special_matched_learned_cards", 0)
         loose_cards = match.get("loose_matched_learned_cards", 0)
         touched_unmatched = match.get("touched_unmatched_cards", 0)
         resolved_duplicates = match.get("resolved_source_duplicate_keys", 0)
@@ -1651,7 +1717,7 @@ class CurrentDefaultMigration(MigrationStepHandler):
 
         if problems:
             match_status = "error"
-        elif loose_cards:
+        elif special_cards or loose_cards:
             match_status = "warn"
         elif matched_cards == learned_cards and exact_cards == learned_cards:
             match_status = "ok"
@@ -1663,7 +1729,9 @@ class CurrentDefaultMigration(MigrationStepHandler):
                 "Learned card matching",
                 (
                     f"{matched_cards} of {learned_cards} learned/touched cards matched; "
-                    f"{exact_cards} exact, {loose_cards} loose, {touched_unmatched} unmatched."
+                    f"{exact_cards} exact, {special_cards} special "
+                    f"({_match_type_counts_text(match.get('special_match_type_counts'))}), "
+                    f"{loose_cards} loose, {touched_unmatched} unmatched."
                 ),
             )
         )
@@ -1743,18 +1811,22 @@ class CurrentDefaultMigration(MigrationStepHandler):
             ),
         ]
 
+        special_matches = match.get("special_matched_learned_cards", 0)
         loose_matches = match.get("loose_matched_learned_cards", 0)
         skipped_cards = match.get("touched_skipped_cards", 0)
         items.append(
             report_item(
-                "warn" if loose_matches or skipped_cards else "ok",
+                "warn" if special_matches or loose_matches or skipped_cards else "ok",
                 "Learned state transfer",
                 (
                     f"{apply.get('full_state_copied', 0)} full states copied from "
                     f"{match.get('matched_learned_cards', 0)} matched learned cards; "
+                    f"{special_matches} special matches "
+                    f"({_match_type_counts_text(match.get('special_match_type_counts'))}); "
                     f"{loose_matches} loose matches; {skipped_cards} intentionally skipped."
                 ),
-                _sample_lines(samples.get("loose_matches", []), 8)
+                _sample_lines(samples.get("special_matches", []), 8)
+                + _sample_lines(samples.get("loose_matches", []), 8)
                 + _sample_lines(samples.get("skipped_touched_unmatched", []), 8),
             )
         )
