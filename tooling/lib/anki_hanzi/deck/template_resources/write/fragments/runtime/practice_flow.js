@@ -86,7 +86,6 @@
     if (goNextButton) {
       goNextButton.onclick = function () {
         revealClickCount = 0;
-        btnTapAudio();
         var currentIndex = getCurrentHanziNum();
         var writer = hanziWriterList[currentIndex];
         if (writer) {
@@ -109,7 +108,6 @@
     var revealButton = document.getElementById("btnRevealChar");
     if (revealButton) {
       revealButton.onclick = function () {
-        btnTapAudio();
         var currentIndex = getCurrentHanziNum();
         var writer = hanziWriterList[currentIndex];
         if (!writer) {
@@ -149,7 +147,6 @@
           return;
         }
 
-        btnTapAudio();
         quizScore.markHint(currentIndex, strokeNum);
         writer.highlightStroke(strokeNum);
       };

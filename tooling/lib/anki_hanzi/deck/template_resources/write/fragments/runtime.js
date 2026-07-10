@@ -1,7 +1,5 @@
   /* __WRITE_RUNTIME_SIZING__ */
 
-  /* __WRITE_RUNTIME_AUDIO__ */
-
   /* __WRITE_RUNTIME_TONE_COLORS__ */
 
   /* __WRITE_RUNTIME_AUDIO_BUTTON__ */

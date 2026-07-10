@@ -106,11 +106,6 @@ WRITE_RUNTIME_FRAGMENT_SPECS = (
         "write runtime sizing",
     ),
     (
-        "  /* __WRITE_RUNTIME_AUDIO__ */",
-        "write/fragments/runtime/audio.js",
-        "write runtime audio",
-    ),
-    (
         "  /* __WRITE_RUNTIME_TONE_COLORS__ */",
         "write/fragments/runtime/tone_colors.js",
         "write runtime tone colors",
