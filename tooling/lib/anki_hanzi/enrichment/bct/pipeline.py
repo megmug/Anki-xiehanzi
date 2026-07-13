@@ -24,27 +24,6 @@ from anki_hanzi.enrichment.bct.source import (
 from anki_hanzi.lexicon import LexiconState
 
 
-def consume_bct_match(match: BctBucketMatch) -> dict[str, Any]:
-    tags = match.source.tags()
-    target_word_count = 0
-    target_form_count = 0
-
-    for target in match.targets:
-        if target.tag_word:
-            target.word.add_tags(tags)
-            target_word_count += 1
-        for form in target.forms:
-            form.add_tags(tags)
-            target_form_count += 1
-
-    return {
-        "source_word": match.source.word,
-        "levels": list(match.source.levels),
-        "target_word_count": target_word_count,
-        "target_form_count": target_form_count,
-    }
-
-
 def apply_matching_bucket(
     state: LexiconState,
     bucket: BctBucketDefinition,
@@ -79,7 +58,11 @@ def matching_bucket_report(
         "description": bucket.description,
         "matching_rule": rule.name if rule is not None else None,
         "matching_rule_description": rule.description if rule is not None else None,
-        "consumption_rule": bucket.consumption_rule if rule is not None else None,
+        "consumption_rule": (
+            bucket.consumption_rule.__name__
+            if rule is not None and bucket.consumption_rule is not None
+            else None
+        ),
         "input_terms": input_term_count,
         "matched_terms": len(matches),
         "remaining_terms_after_consumption": remaining_term_count,
@@ -100,7 +83,9 @@ def unresolved_bucket_report(
         "description": bucket.description,
         "matching_rule": None,
         "matching_rule_description": None,
-        "consumption_rule": bucket.consumption_rule,
+        "consumption_rule": (
+            bucket.consumption_rule.__name__ if bucket.consumption_rule is not None else None
+        ),
         "input_terms": len(unresolved_terms),
         "matched_terms": 0,
         "unresolved_terms": len(unresolved_terms),
@@ -150,9 +135,13 @@ def apply_bct_enrichment_to_state(state: LexiconState, bct_data_dir: Path) -> di
             remaining_term_count=len(remaining_terms),
         )
 
+        if matches and bucket.consumption_rule is None:
+            raise ValueError(f"BCT bucket {bucket.name!r} matched terms without a consumption rule")
+
         for match in matches:
-            if bucket.consumption_rule == "apply_bct_level_tags":
-                consume_bct_match(match)
+            assert bucket.consumption_rule is not None
+            consumption = bucket.consumption_rule(match)
+            if consumption.tags_applied:
                 matched_terms.append(match.source.word)
                 match_methods[match.method] += 1
             else:
@@ -170,11 +159,10 @@ def apply_bct_enrichment_to_state(state: LexiconState, bct_data_dir: Path) -> di
                     }
                 )
 
-            target_form_count = sum(len(target.forms) for target in match.targets)
             for level in match.source.levels:
-                if bucket.consumption_rule == "apply_bct_level_tags":
-                    tagged_words_by_level[level] += 1
-                    tagged_forms_by_level[level] += target_form_count
+                if consumption.tags_applied:
+                    tagged_words_by_level[level] += consumption.target_word_count
+                    tagged_forms_by_level[level] += consumption.target_form_count
 
     duplicate_terms = duplicate_source_terms(source_terms)
 

@@ -105,6 +105,16 @@ BctMatchingFunction = Callable[["LexiconState", BctSourceTerm], BctBucketMatch |
 
 
 @dataclass(frozen=True)
+class BctConsumptionResult:
+    tags_applied: bool
+    target_word_count: int = 0
+    target_form_count: int = 0
+
+
+BctConsumptionFunction = Callable[[BctBucketMatch], BctConsumptionResult]
+
+
+@dataclass(frozen=True)
 class BctMatchingRuleDefinition:
     name: str
     description: str
@@ -118,4 +128,4 @@ class BctBucketDefinition:
     description: str
     report_items: bool
     matching_rule: BctMatchingRuleDefinition | None = None
-    consumption_rule: str | None = "apply_bct_level_tags"
+    consumption_rule: BctConsumptionFunction | None = None

@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from anki_hanzi.enrichment.bct.consumption import (
+    apply_bct_level_tags,
+    ignore_missing_dictionary_word,
+    ignore_non_lexical_pattern,
+)
 from anki_hanzi.enrichment.bct.matching import (
     EXACT_WORD_SINGLE_FORM_RULE,
     EXACT_WORD_UNIQUE_LOWERCASE_FORM_RULE,
@@ -25,6 +30,7 @@ BUCKET_DEFINITIONS = {
         ),
         report_items=False,
         matching_rule=EXACT_WORD_SINGLE_FORM_RULE,
+        consumption_rule=apply_bct_level_tags,
     ),
     "exact_word_unique_lowercase_form": BctBucketDefinition(
         name="exact_word_unique_lowercase_form",
@@ -36,6 +42,7 @@ BUCKET_DEFINITIONS = {
         ),
         report_items=False,
         matching_rule=EXACT_WORD_UNIQUE_LOWERCASE_FORM_RULE,
+        consumption_rule=apply_bct_level_tags,
     ),
     "structured_source_term_variants": BctBucketDefinition(
         name="structured_source_term_variants",
@@ -47,6 +54,7 @@ BUCKET_DEFINITIONS = {
         ),
         report_items=True,
         matching_rule=STRUCTURED_SOURCE_TERM_VARIANTS_RULE,
+        consumption_rule=apply_bct_level_tags,
     ),
     "manual_source_form_targets": BctBucketDefinition(
         name="manual_source_form_targets",
@@ -58,6 +66,7 @@ BUCKET_DEFINITIONS = {
         ),
         report_items=True,
         matching_rule=MANUAL_SOURCE_FORM_TARGETS_RULE,
+        consumption_rule=apply_bct_level_tags,
     ),
     "unique_dictionary_word_all_forms": BctBucketDefinition(
         name="unique_dictionary_word_all_forms",
@@ -70,6 +79,7 @@ BUCKET_DEFINITIONS = {
         ),
         report_items=True,
         matching_rule=UNIQUE_DICTIONARY_WORD_ALL_FORMS_RULE,
+        consumption_rule=apply_bct_level_tags,
     ),
     "missing_dictionary_word": BctBucketDefinition(
         name="missing_dictionary_word",
@@ -81,7 +91,7 @@ BUCKET_DEFINITIONS = {
         ),
         report_items=True,
         matching_rule=MISSING_DICTIONARY_WORD_RULE,
-        consumption_rule="ignore_missing_dictionary_word",
+        consumption_rule=ignore_missing_dictionary_word,
     ),
     "non_lexical_pattern": BctBucketDefinition(
         name="non_lexical_pattern",
@@ -94,7 +104,7 @@ BUCKET_DEFINITIONS = {
         ),
         report_items=True,
         matching_rule=NON_LEXICAL_PATTERN_RULE,
-        consumption_rule="ignore_non_lexical_pattern",
+        consumption_rule=ignore_non_lexical_pattern,
     ),
     "unresolved": BctBucketDefinition(
         name="unresolved",
