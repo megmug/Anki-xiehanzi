@@ -26,6 +26,7 @@ from anki_hanzi.deck.migrator_addon import build_migrator_addon
 from anki_hanzi.deck.models import create_models
 from anki_hanzi.deck.reports import DeckBuildReportInput, build_deck_report
 from anki_hanzi.deck.template_generation import HanziTemplateGenerator
+from anki_hanzi.deck.workspace import temporary_build_workspace
 from anki_hanzi.enrichment import (
     DEFAULT_BCT_DATA_DIR as ENRICHMENT_DEFAULT_BCT_DATA_DIR,
     DEFAULT_FREQUENCY_LIST as ENRICHMENT_DEFAULT_FREQUENCY_LIST,
@@ -123,7 +124,11 @@ def resolve_known_build_ids(current_build_id: str) -> list[str]:
     return list(dict.fromkeys(build_ids))
 
 
-def collect_media(entries: list[EnrichedWordEntry], static_media: list[str]) -> tuple[list[str], list[str]]:
+def collect_media(
+    entries: list[EnrichedWordEntry],
+    static_media: list[str],
+    audio_dir: Path,
+) -> tuple[list[str], list[str]]:
     media = list(static_media)
     missing_audio: list[str] = []
     seen_media_names = {Path(path).name for path in media}
@@ -132,7 +137,7 @@ def collect_media(entries: list[EnrichedWordEntry], static_media: list[str]) -> 
         for filename in entry.audio_filenames:
             if not filename:
                 continue
-            path = common.EXTRA_AUDIO_DIR / filename
+            path = audio_dir / filename
             if path.exists():
                 if filename not in seen_media_names:
                     seen_media_names.add(filename)
@@ -287,95 +292,100 @@ def build_package(
     config = load_deck_config(deck_config_path)
     if not config.selection.config_found:
         raise ValueError("deck config file is required but not found")
-    audio_generator = AudioGenerator(
-        config.audio.engine,
-        exceptions_path=DEFAULT_AUDIO_EXCEPTIONS,
-    )
-    enriched_state_result = build_enriched_state(
-        snapshot_manifest=snapshot_manifest,
-        source_file=source_file,
-        master_db_output=master_db_output,
-        enriched_db_output=enriched_db_output,
-        hsk_data_dir=hsk_data_dir,
-        frequency_list=frequency_list,
-        yct_data_dir=yct_data_dir,
-        bct_data_dir=bct_data_dir,
-    )
-    state = enriched_state_result.state
-    entries_by_card_type, selection_report = build_entries_from_state(
-        state,
-        config.selection,
-        audio_generator,
-    )
-    all_deck_entries = flatten_entries_by_card_type(entries_by_card_type)
-    audio_deck_entries = unique_audio_entries(all_deck_entries)
-    audio_jobs = audio_generator.jobs_for_texts(entry.simplified for entry in audio_deck_entries)
-    build_id = resolve_build_id()
-    known_build_ids = resolve_known_build_ids(build_id)
-    build_migrator_addon(
-        source_dir=DEFAULT_MIGRATOR_ADDON_SOURCE,
-        output_path=migrator_addon_output,
-        build_id=build_id,
-        known_build_ids=known_build_ids,
-        zip_datetime=zip_generated_datetime or DEFAULT_ZIP_DATETIME,
-    )
-
-    static_media = HanziTemplateGenerator().static_media()
-    audio_result = audio_generator.generate(audio_jobs)
-
-    # Build hanzi-writer JS bundle for offline Write deck usage
-    write_entries = [entry for entry in entries_by_card_type.get("Write", []) if is_writable_hanzi(entry.simplified)]
-    hw_bundle_path = Path(common.EXTRA_AUDIO_DIR) / "hanzi-writer-data.js"
-    hw_bundle_path.parent.mkdir(parents=True, exist_ok=True)
-    build_hanzi_writer_bundle(write_entries, hw_bundle_path)
-
-    models = create_models(config, hw_bundle_path if hw_bundle_path.exists() else None)
-    decks = build_decks(config, models, entries_by_card_type, build_id)
-
-    media_files, missing_audio = collect_media(audio_deck_entries, static_media)
-
-    package = genanki.Package(decks, media_files=media_files)
-    write_package(
-        package=package,
-        output_apkg=output_apkg,
-        timestamp=timestamp,
-        deterministic_zip=deterministic_zip,
-        zip_generated_datetime=zip_generated_datetime,
-    )
-
-    report = build_deck_report(
-        DeckBuildReportInput(
-            output_apkg=output_apkg,
-            report_path=report_path,
-            migrator_addon_output=migrator_addon_output,
+    with temporary_build_workspace() as workspace:
+        audio_generator = AudioGenerator(
+            config.audio.engine,
+            audio_dir=workspace.audio_dir,
+            exceptions_path=DEFAULT_AUDIO_EXCEPTIONS,
+        )
+        enriched_state_result = build_enriched_state(
+            snapshot_manifest=snapshot_manifest,
+            source_file=source_file,
             master_db_output=master_db_output,
             enriched_db_output=enriched_db_output,
-            source_database_report=enriched_state_result.source_database_report,
-            enriched_lexicon=enriched_state_result.enriched_lexicon,
-            enrichment_report=enriched_state_result.enrichment_report,
-            matching_report=enriched_state_result.matching_report,
-            selection_report=selection_report,
-            source_schema=ENRICHED_LEXICON_SCHEMA,
+            hsk_data_dir=hsk_data_dir,
+            frequency_list=frequency_list,
+            yct_data_dir=yct_data_dir,
+            bct_data_dir=bct_data_dir,
+        )
+        state = enriched_state_result.state
+        entries_by_card_type, selection_report = build_entries_from_state(
+            state,
+            config.selection,
+            audio_generator,
+        )
+        all_deck_entries = flatten_entries_by_card_type(entries_by_card_type)
+        audio_deck_entries = unique_audio_entries(all_deck_entries)
+        audio_jobs = audio_generator.jobs_for_texts(entry.simplified for entry in audio_deck_entries)
+        build_id = resolve_build_id()
+        known_build_ids = resolve_known_build_ids(build_id)
+        build_migrator_addon(
+            source_dir=DEFAULT_MIGRATOR_ADDON_SOURCE,
+            output_path=migrator_addon_output,
             build_id=build_id,
-            card_types=config.card_types,
-            card_settings=config.card_settings,
-            dedupe_key=HANZI_DEDUPE_KEY,
-            entries_by_card_type=entries_by_card_type,
-            all_entries=all_deck_entries,
-            total_cards=sum(len(deck.notes) for deck in decks),
-            decks_count=len(decks),
-            media_files=media_files,
-            static_media=static_media,
-            audio_engine=config.audio.engine,
-            audio_voices=audio_generator.voice_report(),
-            audio_result=audio_result,
+            known_build_ids=known_build_ids,
+            zip_datetime=zip_generated_datetime or DEFAULT_ZIP_DATETIME,
+        )
+
+        static_media = HanziTemplateGenerator().static_media()
+        audio_result = audio_generator.generate(audio_jobs)
+
+        write_entries = [
+            entry for entry in entries_by_card_type.get("Write", []) if is_writable_hanzi(entry.simplified)
+        ]
+        build_hanzi_writer_bundle(write_entries, workspace.hanzi_writer_bundle)
+
+        models = create_models(config, workspace.hanzi_writer_bundle)
+        decks = build_decks(config, models, entries_by_card_type, build_id)
+
+        media_files, missing_audio = collect_media(
+            audio_deck_entries,
+            static_media,
+            workspace.audio_dir,
+        )
+
+        package = genanki.Package(decks, media_files=media_files)
+        write_package(
+            package=package,
+            output_apkg=output_apkg,
             timestamp=timestamp,
             deterministic_zip=deterministic_zip,
-            default_zip_datetime=DEFAULT_ZIP_DATETIME,
             zip_generated_datetime=zip_generated_datetime,
-            dropped_duplicates=state.hanzi_dropped_duplicates,
-            missing_audio_files=missing_audio,
         )
-    )
-    write_json(report_path, report)
-    return report
+
+        report = build_deck_report(
+            DeckBuildReportInput(
+                output_apkg=output_apkg,
+                report_path=report_path,
+                migrator_addon_output=migrator_addon_output,
+                master_db_output=master_db_output,
+                enriched_db_output=enriched_db_output,
+                source_database_report=enriched_state_result.source_database_report,
+                enriched_lexicon=enriched_state_result.enriched_lexicon,
+                enrichment_report=enriched_state_result.enrichment_report,
+                matching_report=enriched_state_result.matching_report,
+                selection_report=selection_report,
+                source_schema=ENRICHED_LEXICON_SCHEMA,
+                build_id=build_id,
+                card_types=config.card_types,
+                card_settings=config.card_settings,
+                dedupe_key=HANZI_DEDUPE_KEY,
+                entries_by_card_type=entries_by_card_type,
+                all_entries=all_deck_entries,
+                total_cards=sum(len(deck.notes) for deck in decks),
+                decks_count=len(decks),
+                media_files=media_files,
+                static_media=static_media,
+                audio_engine=config.audio.engine,
+                audio_voices=audio_generator.voice_report(),
+                audio_result=audio_result,
+                timestamp=timestamp,
+                deterministic_zip=deterministic_zip,
+                default_zip_datetime=DEFAULT_ZIP_DATETIME,
+                zip_generated_datetime=zip_generated_datetime,
+                dropped_duplicates=state.hanzi_dropped_duplicates,
+                missing_audio_files=missing_audio,
+            )
+        )
+        write_json(report_path, report)
+        return report

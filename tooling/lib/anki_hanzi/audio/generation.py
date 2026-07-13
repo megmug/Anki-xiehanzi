@@ -7,8 +7,14 @@ import traceback
 from pathlib import Path
 from typing import Iterable
 
-from anki_hanzi.audio.api import AudioBackend, AudioFailure, AudioGenerationResult, AudioJob, AudioSkip
-from anki_hanzi.deck import common
+from anki_hanzi.audio.api import (
+    AudioBackend,
+    AudioFailure,
+    AudioGenerationResult,
+    AudioJob,
+    AudioSkip,
+    remove_failed_audio_output,
+)
 
 
 AUDIO_FILENAME_TEMPLATES = {
@@ -82,7 +88,7 @@ class AudioGenerator:
     def __init__(
         self,
         engine: str,
-        audio_dir: Path = common.EXTRA_AUDIO_DIR,
+        audio_dir: Path,
         exceptions_path: Path | None = None,
     ) -> None:
         self.backend = create_audio_backend(engine)
@@ -202,7 +208,7 @@ class AudioGenerator:
                 self.backend.synthesize(job)
                 generated.append(str(job.output_path))
             except Exception as exc:
-                common.remove_failed_audio_output(job.output_path)
+                remove_failed_audio_output(job.output_path)
                 print(
                     f"  {self.backend.engine} audio failed: "
                     f"word={job.text!r} slot={job.voice.slot} "

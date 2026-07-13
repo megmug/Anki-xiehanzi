@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import time
 
-from anki_hanzi.audio.api import AudioBackend, AudioJob, AudioVoice
-from anki_hanzi.deck import common
+from anki_hanzi.audio.api import AudioBackend, AudioJob, AudioVoice, remove_failed_audio_output
 
 
 EDGE_TTS_VOICES = (
@@ -31,10 +30,10 @@ class EdgeTtsBackend(AudioBackend):
                 communicate.save_sync(str(job.output_path))
                 if job.output_path.exists() and job.output_path.stat().st_size > 0:
                     return
-                common.remove_failed_audio_output(job.output_path)
+                remove_failed_audio_output(job.output_path)
                 raise RuntimeError("edge-tts produced no audio data")
             except Exception as exc:
-                common.remove_failed_audio_output(job.output_path)
+                remove_failed_audio_output(job.output_path)
                 if attempt >= max_retries - 1:
                     raise
                 delay = 2 ** (attempt + 1)

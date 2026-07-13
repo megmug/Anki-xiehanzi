@@ -70,3 +70,8 @@ class AudioBackend(Protocol):
 
     def synthesize(self, job: AudioJob) -> None:
         """Write one job's audio file to ``job.output_path``."""
+
+
+def remove_failed_audio_output(path: Path) -> None:
+    if path.exists() and path.stat().st_size == 0:
+        path.unlink()

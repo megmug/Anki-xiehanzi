@@ -214,7 +214,6 @@ let
           ".yarn-cache"
           "build_reports"
           "ci-artifacts"
-          "deck_inputs/extra_audio"
           "master_db_output"
           "node_modules"
           "result"
