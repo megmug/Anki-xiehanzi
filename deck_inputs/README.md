@@ -50,6 +50,7 @@ Full no-audio config:
 `selection.mode` controls how words and forms are selected.
 `"tagged"` selects entries that match at least one configured tag.
 `"all"` selects every enriched entry and ignores `selection.tags`.
+Other mode values and unknown selection settings fail the build.
 
 `selection.tags` may be a string or a list of strings.
 Configured tags use the compact source form, such as `hsk:1` or `freq:top2500`.
@@ -87,6 +88,7 @@ This keeps tag combinations additive.
 `card_types` selects which card families are emitted.
 The default is all three card types.
 The supported values are `Meaning`, `Pinyin`, and `Write`.
+The configured list must not be empty or contain duplicates.
 
 Example:
 

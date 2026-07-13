@@ -11,6 +11,10 @@ from typing import Any
 from anki_hanzi.deck import common
 
 
+SUPPORTED_SELECTION_MODES = {"all", "tagged"}
+SUPPORTED_SELECTION_FIELDS = {"individual_simplified", "mode", "tags"}
+
+
 @dataclass(frozen=True)
 class AudioConfig:
     engine: str = "off"  # "kokoro", "edge_tts", or "off"
@@ -133,16 +137,28 @@ def load_deck_config(path: Path | None = None) -> DeckConfig:
 
 
 def parse_deck_selection(raw: dict[str, Any], config_path: Path) -> DeckSelection:
+    unknown_keys = sorted(set(raw) - SUPPORTED_SELECTION_FIELDS)
+    if unknown_keys:
+        raise ValueError(f"deck config selection has unknown setting: {', '.join(unknown_keys)}")
+
+    mode = raw.get("mode")
+    if not isinstance(mode, str) or mode not in SUPPORTED_SELECTION_MODES:
+        raise ValueError(
+            f"deck config selection.mode must be one of: {', '.join(sorted(SUPPORTED_SELECTION_MODES))}"
+        )
+
     tags_raw = raw.get("tags", [])
     if isinstance(tags_raw, str):
         tags = (tags_raw,)
     elif isinstance(tags_raw, list):
-        tags = tuple(str(t) for t in tags_raw)
+        if not all(isinstance(tag, str) for tag in tags_raw):
+            raise ValueError("deck config selection.tags must be a string or a list of strings")
+        tags = tuple(tags_raw)
     else:
-        tags = ()
+        raise ValueError("deck config selection.tags must be a string or a list of strings")
 
     return DeckSelection(
-        mode=str(raw.get("mode", "")),
+        mode=mode,
         tags=tags,
         individual_simplified=parse_simplified_list(
             raw.get("individual_simplified", []),
@@ -158,7 +174,9 @@ def parse_simplified_list(value: Any, field_name: str) -> frozenset[str]:
         return frozenset()
     if not isinstance(value, list):
         raise ValueError(f"deck config selection.{field_name} must be a list")
-    return frozenset(simplified for simplified in (str(item or "").strip() for item in value) if simplified)
+    if not all(isinstance(item, str) for item in value):
+        raise ValueError(f"deck config selection.{field_name} must be a list of strings")
+    return frozenset(simplified for simplified in (item.strip() for item in value) if simplified)
 
 
 def parse_bool(value: Any, field_name: str) -> bool:
@@ -227,11 +245,17 @@ def merge_card_types(raw: Any, default: tuple[str, ...]) -> tuple[str, ...]:
         return default
     if not isinstance(raw, list):
         raise ValueError("deck config card_types must be a list")
+    if not raw:
+        raise ValueError("deck config card_types must not be empty")
+    if not all(isinstance(card_type, str) for card_type in raw):
+        raise ValueError("deck config card_types must be a list of strings")
 
-    card_types = tuple(str(card_type) for card_type in raw)
+    card_types = tuple(raw)
     unknown_card_types = sorted(set(card_types) - set(common.CARD_TYPES))
     if unknown_card_types:
         raise ValueError(f"deck config card_types has unknown card type: {', '.join(unknown_card_types)}")
+    if len(card_types) != len(set(card_types)):
+        raise ValueError("deck config card_types must not contain duplicates")
     return card_types
 
 
