@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 from typing import Any
 
+from anki_hanzi.enrichment.model import EnrichmentStageResult
 from anki_hanzi.lexicon import LexiconState
 from anki_hanzi.lexicon.state import LexiconForm
 from anki_hanzi.pinyin import strict_numbered_preserve_case
@@ -72,11 +73,7 @@ def manual_yct_forms(
         return [], None
 
     target_keys = {key for value in target_pinyin_values if (key := yct_pinyin_key(value))}
-    matches = [
-        form
-        for form in word_forms
-        if target_keys.intersection(form_pinyin_keys(form))
-    ]
+    matches = [form for form in word_forms if target_keys.intersection(form_pinyin_keys(form))]
     return matches, "manual_yct_match" if matches else "manual_target_missing"
 
 
@@ -87,9 +84,7 @@ def matching_yct_forms(word_forms: list[LexiconForm], source_key: str) -> tuple[
 
     source_lower_key = source_key.casefold()
     casefold_matches = [
-        form
-        for form in word_forms
-        if source_lower_key in {key.casefold() for key in form_pinyin_keys(form)}
+        form for form in word_forms if source_lower_key in {key.casefold() for key in form_pinyin_keys(form)}
     ]
     if len(casefold_matches) == 1:
         return casefold_matches, "unique_casefold_pinyin"
@@ -98,7 +93,7 @@ def matching_yct_forms(word_forms: list[LexiconForm], source_key: str) -> tuple[
     return [], "pinyin_mismatch"
 
 
-def apply_yct_enrichment_to_state(state: LexiconState, yct_data_dir: Path) -> dict[str, Any]:
+def apply_yct_enrichment_to_state(state: LexiconState, yct_data_dir: Path) -> EnrichmentStageResult:
     entries = load_yct_entries(yct_data_dir)
     entries_by_word: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
@@ -153,9 +148,7 @@ def apply_yct_enrichment_to_state(state: LexiconState, yct_data_dir: Path) -> di
                             "word": simplified,
                             "level": entry["level"],
                             "source_pinyin": entry["pinyin"],
-                            "target_pinyin": [
-                                form.pinyin_reading_string for form in matching_forms
-                            ],
+                            "target_pinyin": [form.pinyin_reading_string for form in matching_forms],
                         }
                     )
             else:
@@ -172,9 +165,7 @@ def apply_yct_enrichment_to_state(state: LexiconState, yct_data_dir: Path) -> di
                     "word": simplified,
                     "reason": "pinyin_mismatch",
                     "entries": unmatched_source_entries or source_entries,
-                    "dictionary_pinyin": [
-                        form.pinyin_reading_string for form in word.forms_in_order()
-                    ],
+                    "dictionary_pinyin": [form.pinyin_reading_string for form in word.forms_in_order()],
                 }
             )
 
@@ -184,7 +175,7 @@ def apply_yct_enrichment_to_state(state: LexiconState, yct_data_dir: Path) -> di
         if len({record["level"] for record in records}) != len(records)
     }
 
-    return {
+    report = {
         "stage": "yct_enrichment",
         "source": str(yct_data_dir),
         "levels": list(YCT_LEVELS),
@@ -199,3 +190,14 @@ def apply_yct_enrichment_to_state(state: LexiconState, yct_data_dir: Path) -> di
         "tagged_forms_by_level": tagged_forms_by_level,
         "unmatched_term_samples": unmatched_terms[:25],
     }
+    return EnrichmentStageResult(
+        name="yct_enrichment",
+        summary={
+            "yct_source_terms": len(entries_by_word),
+            "yct_matched_terms": len(matched_terms),
+            "yct_unmatched_terms": len(unmatched_terms),
+            "yct_tags_by_word": tagged_words_by_level,
+            "yct_tags_by_form": tagged_forms_by_level,
+        },
+        report=report,
+    )

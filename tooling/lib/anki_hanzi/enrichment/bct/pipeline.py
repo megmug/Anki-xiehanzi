@@ -21,6 +21,7 @@ from anki_hanzi.enrichment.bct.source import (
     group_bct_source_terms,
     load_bct_entries,
 )
+from anki_hanzi.enrichment.model import EnrichmentStageResult
 from anki_hanzi.lexicon import LexiconState
 
 
@@ -59,9 +60,7 @@ def matching_bucket_report(
         "matching_rule": rule.name if rule is not None else None,
         "matching_rule_description": rule.description if rule is not None else None,
         "consumption_rule": (
-            bucket.consumption_rule.__name__
-            if rule is not None and bucket.consumption_rule is not None
-            else None
+            bucket.consumption_rule.__name__ if rule is not None and bucket.consumption_rule is not None else None
         ),
         "input_terms": input_term_count,
         "matched_terms": len(matches),
@@ -83,9 +82,7 @@ def unresolved_bucket_report(
         "description": bucket.description,
         "matching_rule": None,
         "matching_rule_description": None,
-        "consumption_rule": (
-            bucket.consumption_rule.__name__ if bucket.consumption_rule is not None else None
-        ),
+        "consumption_rule": (bucket.consumption_rule.__name__ if bucket.consumption_rule is not None else None),
         "input_terms": len(unresolved_terms),
         "matched_terms": 0,
         "unresolved_terms": len(unresolved_terms),
@@ -95,7 +92,7 @@ def unresolved_bucket_report(
     }
 
 
-def apply_bct_enrichment_to_state(state: LexiconState, bct_data_dir: Path) -> dict[str, Any]:
+def apply_bct_enrichment_to_state(state: LexiconState, bct_data_dir: Path) -> EnrichmentStageResult:
     entries = load_bct_entries(bct_data_dir)
     source_terms = group_bct_source_terms(entries)
     remaining_terms = list(source_terms)
@@ -166,7 +163,7 @@ def apply_bct_enrichment_to_state(state: LexiconState, bct_data_dir: Path) -> di
 
     duplicate_terms = duplicate_source_terms(source_terms)
 
-    return {
+    report = {
         "stage": "bct_enrichment",
         "source": str(bct_data_dir),
         "levels": list(BCT_LEVELS),
@@ -194,3 +191,14 @@ def apply_bct_enrichment_to_state(state: LexiconState, bct_data_dir: Path) -> di
         "unmatched_terms_detail": unmatched_terms,
         "unmatched_term_samples": unmatched_terms[:50],
     }
+    return EnrichmentStageResult(
+        name="bct_enrichment",
+        summary={
+            "bct_source_terms": len(source_terms),
+            "bct_matched_terms": len(matched_terms),
+            "bct_unmatched_terms": len(unmatched_terms),
+            "bct_tags_by_word": tagged_words_by_level,
+            "bct_tags_by_form": tagged_forms_by_level,
+        },
+        report=report,
+    )

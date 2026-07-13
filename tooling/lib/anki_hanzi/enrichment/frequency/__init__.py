@@ -6,8 +6,8 @@ import html
 import re
 import unicodedata
 from pathlib import Path
-from typing import Any
 
+from anki_hanzi.enrichment.model import EnrichmentStageResult
 from anki_hanzi.lexicon import LexiconState
 
 
@@ -44,7 +44,10 @@ def top_frequency_tags(rank: int | None) -> list[str]:
     return [f"freq:top{threshold}" for threshold in TOP_FREQUENCY_THRESHOLDS if rank <= threshold]
 
 
-def apply_frequency_enrichment_to_state(state: LexiconState, frequency_list_path: Path) -> dict[str, Any]:
+def apply_frequency_enrichment_to_state(
+    state: LexiconState,
+    frequency_list_path: Path,
+) -> EnrichmentStageResult:
     ranks = load_frequency_ranks(frequency_list_path)
     tagged_words_by_threshold = {f"top{threshold}": 0 for threshold in TOP_FREQUENCY_THRESHOLDS}
     tagged_forms_by_threshold = {f"top{threshold}": 0 for threshold in TOP_FREQUENCY_THRESHOLDS}
@@ -68,7 +71,7 @@ def apply_frequency_enrichment_to_state(state: LexiconState, frequency_list_path
             for tag in tags:
                 tagged_forms_by_threshold[tag.removeprefix("freq:")] += 1
 
-    return {
+    report = {
         "stage": "frequency_enrichment",
         "source": str(frequency_list_path),
         "thresholds": list(TOP_FREQUENCY_THRESHOLDS),
@@ -77,3 +80,11 @@ def apply_frequency_enrichment_to_state(state: LexiconState, frequency_list_path
         "tagged_words_by_threshold": tagged_words_by_threshold,
         "tagged_forms_by_threshold": tagged_forms_by_threshold,
     }
+    return EnrichmentStageResult(
+        name="frequency_enrichment",
+        summary={
+            "frequency_tags_by_word": tagged_words_by_threshold,
+            "frequency_tags_by_form": tagged_forms_by_threshold,
+        },
+        report=report,
+    )

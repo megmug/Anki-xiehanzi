@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from anki_hanzi.enrichment.model import EnrichmentStageResult
 from anki_hanzi.lexicon import LexiconState
 from anki_hanzi.enrichment.hsk.buckets import (
     bucket_definitions_by_phase,
@@ -52,9 +53,8 @@ from anki_hanzi.enrichment.hsk.reports import (
 
 @dataclass(frozen=True)
 class HskEnrichmentResult:
-    enrichment_report: dict[str, Any]
+    stage: EnrichmentStageResult
     matching_report: dict[str, Any]
-    summary: dict[str, Any]
     dropped_duplicates: list[dict[str, Any]]
 
 
@@ -288,8 +288,11 @@ def apply_hsk_enrichment_to_state(
     )
 
     return HskEnrichmentResult(
-        enrichment_report=report,
+        stage=EnrichmentStageResult(
+            name="hsk_enrichment",
+            summary=summary,
+            report=report,
+        ),
         matching_report=matching_report,
-        summary=summary,
         dropped_duplicates=dropped_duplicates,
     )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from anki_hanzi.enrichment.model import EnrichmentStageResult
 from anki_hanzi.lexicon import LexiconForm, LexiconState, LexiconWord
 from anki_hanzi.lexicon.definitions import (
     ErhuaVariantDefinition,
@@ -55,7 +56,7 @@ def _resolved_definition_texts(source_form: LexiconForm, target_form: LexiconFor
     return resolved_texts
 
 
-def apply_erhua_definition_enrichment_to_state(state: LexiconState) -> dict[str, Any]:
+def apply_erhua_definition_enrichment_to_state(state: LexiconState) -> EnrichmentStageResult:
     report: dict[str, Any] = {
         "stage": "erhua_definition_enrichment",
         "description": "Resolve CC-CEDICT erhua variant references into nested derived definition lines.",
@@ -136,4 +137,13 @@ def apply_erhua_definition_enrichment_to_state(state: LexiconState) -> dict[str,
                         }
                     )
 
-    return report
+    return EnrichmentStageResult(
+        name="erhua_definition_enrichment",
+        summary={
+            "erhua_variant_definitions": report["scanned_erhua_definitions"],
+            "erhua_variant_definitions_resolved": report["resolved_erhua_definitions"],
+            "erhua_variant_definitions_duplicate_only": report["duplicate_only_erhua_definitions"],
+            "erhua_variant_definitions_unresolved": report["unresolved_erhua_definitions"],
+        },
+        report=report,
+    )
