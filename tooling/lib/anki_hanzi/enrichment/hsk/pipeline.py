@@ -22,9 +22,10 @@ from anki_hanzi.enrichment.hsk.consumption import (
 )
 from anki_hanzi.enrichment.hsk.model import (
     BucketResult,
+    HskMatchingPair,
+    HskSourceForm,
     PairConsumption,
     PairPipelineResult,
-    PipelineItem,
     SourcePreludeConsumption,
     SourcePreludePipelineResult,
     empty_pair_consumption,
@@ -38,7 +39,7 @@ from anki_hanzi.enrichment.hsk.source import (
 )
 from anki_hanzi.enrichment.hsk.matching import (
     TargetFormRef,
-    build_source_entry_reports,
+    build_source_forms,
     build_target_form_index,
     materialize_simplified_match_pairs,
 )
@@ -58,20 +59,20 @@ class HskEnrichmentResult:
 
 
 def apply_source_prelude_rules(
-    entry_reports_by_id: dict[int, dict[str, Any]],
+    source_forms_by_id: dict[int, HskSourceForm],
     target_form_index: dict[str, list[TargetFormRef]],
 ) -> SourcePreludePipelineResult:
-    remaining_source_form_ids = set(entry_reports_by_id)
+    remaining_source_form_ids = set(source_forms_by_id)
     bucket_results: dict[str, BucketResult] = {}
     consumed_by_source_form: dict[int, str] = {}
 
     for definition in bucket_definitions_by_phase("source_prelude"):
-        selected_items: list[PipelineItem] = []
+        selected_items: list[HskSourceForm] = []
         input_source_form_count = len(remaining_source_form_ids)
 
         for rule in definition.matching_rules:
             result = rule.match_source_prelude(
-                entry_reports_by_id,
+                source_forms_by_id,
                 target_form_index,
                 remaining_source_form_ids,
                 definition.name,
@@ -102,14 +103,14 @@ def apply_source_prelude_rules(
     }
 
 
-def apply_pair_pipeline_rules(working_pairs: list[PipelineItem]) -> PairPipelineResult:
+def apply_pair_pipeline_rules(working_pairs: list[HskMatchingPair]) -> PairPipelineResult:
     remaining_items = list(working_pairs)
     bucket_results: dict[str, BucketResult] = {}
     consumed_by_source_form: dict[int, str] = {}
 
     for definition in bucket_definitions_by_phase("pair_pipeline"):
         input_items = remaining_items
-        selected_items: list[PipelineItem] = []
+        selected_items: list[HskMatchingPair] = []
 
         for rule in definition.matching_rules:
             result = rule.match_pairs(input_items, definition.name)
@@ -191,11 +192,11 @@ def build_matching_pipeline(
     target_form_index = build_target_form_index(state)
     dictionary_word_count = len(state.sorted_words())
     dictionary_form_count = sum(len(target_refs) for target_refs in target_form_index.values())
-    entry_reports_by_id = build_source_entry_reports(deck_entries)
+    source_forms_by_id = build_source_forms(deck_entries)
 
-    source_prelude_result = apply_source_prelude_rules(entry_reports_by_id, target_form_index)
+    source_prelude_result = apply_source_prelude_rules(source_forms_by_id, target_form_index)
     materialization_result = materialize_simplified_match_pairs(
-        entry_reports_by_id,
+        source_forms_by_id,
         target_form_index,
         source_prelude_result["remaining_source_form_ids"],
     )
@@ -217,7 +218,7 @@ def build_matching_pipeline(
         "target_form_index": target_form_index,
         "dictionary_word_count": dictionary_word_count,
         "dictionary_form_count": dictionary_form_count,
-        "entry_reports_by_id": entry_reports_by_id,
+        "source_forms_by_id": source_forms_by_id,
         "source_prelude_result": source_prelude_result,
         "materialization_result": materialization_result,
         "working_pairs": working_pairs,

@@ -25,18 +25,19 @@ from anki_hanzi.enrichment.hsk.rule_helpers import (
     pinyin_rule_kind,
 )
 from anki_hanzi.enrichment.hsk.model import (
+    HskMatchingPair,
+    HskSourceForm,
     PairConsumption,
-    PipelineItem,
     SourcePreludeConsumption,
     bucket_matching_pair_count,
     bucket_source_form_ids,
-    pair_source_form_id,
+    item_source_form_id,
 )
 from anki_hanzi.enrichment.hsk.source import entry_summary
 
 
-SourcePreludeConsumptionHandler = Callable[[list[PipelineItem], set[int]], SourcePreludeConsumption]
-PairConsumptionHandler = Callable[[list[PipelineItem], list[PipelineItem]], PairConsumption]
+SourcePreludeConsumptionHandler = Callable[[list[HskSourceForm], set[int]], SourcePreludeConsumption]
+PairConsumptionHandler = Callable[[list[HskMatchingPair], list[HskMatchingPair]], PairConsumption]
 ConsumptionRuleHandler = SourcePreludeConsumptionHandler | PairConsumptionHandler
 MissingDictionaryWordStateHandler = Callable[[LexiconState, list[dict[str, Any]], dict[str, Any]], dict[str, Any]]
 BucketStateHandler = Callable[[LexiconState, list[dict[str, Any]], dict[str, Any], dict[str, Any]], dict[str, Any]]
@@ -52,7 +53,7 @@ class ConsumptionRuleDefinition:
 
     def consume_source_prelude(
         self,
-        selected_items: list[PipelineItem],
+        selected_items: list[HskSourceForm],
         remaining_source_form_ids: set[int],
     ) -> SourcePreludeConsumption:
         handler = cast(SourcePreludeConsumptionHandler, self.handler)
@@ -60,8 +61,8 @@ class ConsumptionRuleDefinition:
 
     def consume_pairs(
         self,
-        selected_items: list[PipelineItem],
-        remaining_items: list[PipelineItem],
+        selected_items: list[HskMatchingPair],
+        remaining_items: list[HskMatchingPair],
     ) -> PairConsumption:
         handler = cast(PairConsumptionHandler, self.handler)
         return handler(selected_items, remaining_items)
@@ -169,7 +170,7 @@ def new_form_stats() -> dict[str, Any]:
 
 
 def drop_missing_dictionary_word_source_forms(
-    selected_items: list[PipelineItem],
+    selected_items: list[HskSourceForm],
     remaining_source_form_ids: set[int],
 ) -> SourcePreludeConsumption:
     consumed_source_form_ids = bucket_source_form_ids(selected_items) & remaining_source_form_ids
@@ -183,15 +184,15 @@ def drop_missing_dictionary_word_source_forms(
 
 
 def drop_source_form_pairs(
-    selected_items: list[PipelineItem],
-    remaining_items: list[PipelineItem],
+    selected_items: list[HskMatchingPair],
+    remaining_items: list[HskMatchingPair],
 ) -> PairConsumption:
     consumed_source_form_ids = bucket_source_form_ids(selected_items)
-    remaining_after_consumption: list[PipelineItem] = []
-    removed_from_remaining_items: list[PipelineItem] = []
+    remaining_after_consumption: list[HskMatchingPair] = []
+    removed_from_remaining_items: list[HskMatchingPair] = []
 
     for item in remaining_items:
-        if pair_source_form_id(item) in consumed_source_form_ids:
+        if item.source_form_id in consumed_source_form_ids:
             removed_from_remaining_items.append(item)
         else:
             remaining_after_consumption.append(item)
@@ -207,15 +208,15 @@ def drop_source_form_pairs(
 
 
 def assert_default_unresolved_empty_pairs(
-    selected_items: list[PipelineItem],
-    remaining_items: list[PipelineItem],
+    selected_items: list[HskMatchingPair],
+    remaining_items: list[HskMatchingPair],
 ) -> PairConsumption:
     if selected_items:
         sample = [
             {
-                "source_form_id": pair_source_form_id(item),
-                "source": item.get("source"),
-                "target": item.get("target"),
+                "source_form_id": item.source_form_id,
+                "source": item.source_form.source_report(),
+                "target": item.target_report(),
             }
             for item in selected_items[:10]
         ]
@@ -307,12 +308,15 @@ def deck_entries_for_source_form_ids(
     return [deck_entries[source_form_id] for source_form_id in sorted(source_form_ids)]
 
 
-def deck_entry_for_pair(deck_entries: list[dict[str, Any]], item: dict[str, Any]) -> dict[str, Any]:
-    return deck_entries[pair_source_form_id(item)]
+def deck_entry_for_pair(deck_entries: list[dict[str, Any]], item: HskMatchingPair) -> dict[str, Any]:
+    return deck_entries[item.source_form_id]
 
 
-def deck_entry_with_manual_pinyin_override(deck_entries: list[dict[str, Any]], item: dict[str, Any]) -> dict[str, Any]:
-    override = item["context"].get("manual_pinyin_override")
+def deck_entry_with_manual_pinyin_override(
+    deck_entries: list[dict[str, Any]],
+    item: HskMatchingPair,
+) -> dict[str, Any]:
+    override = item.context.get("manual_pinyin_override")
     if override is None:
         raise ValueError(f"Manual Pinyin override bucket item lacks override context: {item!r}")
 
@@ -325,12 +329,9 @@ def deck_entry_with_manual_pinyin_override(deck_entries: list[dict[str, Any]], i
 
 def target_word_and_form_from_pair(
     state: LexiconState,
-    item: dict[str, Any],
+    item: HskMatchingPair,
 ) -> tuple[LexiconWord, LexiconForm, str, str]:
-    target = item.get("target")
-    if not isinstance(target, dict):
-        raise ValueError(f"Matching pair lacks target identity: {item!r}")
-    return target_word_and_form_from_target(state, target)
+    return target_word_and_form_from_target(state, item.target_report())
 
 
 def target_word_and_form_from_target(
@@ -407,12 +408,12 @@ def add_synthetic_words_to_state(state: LexiconState, missing_entries: list[dict
     return synthetic_words
 
 
-def validate_exact_pinyin_item(entry: dict[str, Any], form: LexiconForm, item: dict[str, Any]) -> None:
+def validate_exact_pinyin_item(entry: dict[str, Any], form: LexiconForm, item: HskMatchingPair) -> None:
     if pinyin_rule_kind(entry["pinyin"], form.pinyin_reading_string) != "exact":
         raise ValueError(f"Perfect-match bucket selected a non-exact pair: {item!r}")
 
 
-def validate_format_variant_item(entry: dict[str, Any], form: LexiconForm, item: dict[str, Any]) -> None:
+def validate_format_variant_item(entry: dict[str, Any], form: LexiconForm, item: HskMatchingPair) -> None:
     if pinyin_rule_kind(entry["pinyin"], form.pinyin_reading_string) != "format_variant":
         raise ValueError(f"Format-variant bucket selected a non-format-variant pair: {item!r}")
 
@@ -420,7 +421,7 @@ def validate_format_variant_item(entry: dict[str, Any], form: LexiconForm, item:
 def validate_case_variant_exact_definition_item(
     entry: dict[str, Any],
     form: LexiconForm,
-    item: dict[str, Any],
+    item: HskMatchingPair,
 ) -> None:
     if pinyin_rule_kind(entry["pinyin"], form.pinyin_reading_string) != "case_variant":
         raise ValueError(f"Case-variant bucket selected a non-case-variant pair: {item!r}")
@@ -428,7 +429,7 @@ def validate_case_variant_exact_definition_item(
         raise ValueError(f"Case-variant bucket selected a non-exact-definition pair: {item!r}")
 
 
-def validate_exact_definition_item(entry: dict[str, Any], form: LexiconForm, item: dict[str, Any]) -> None:
+def validate_exact_definition_item(entry: dict[str, Any], form: LexiconForm, item: HskMatchingPair) -> None:
     if not definition_sets_exact(definitions_from_meaning_html(entry["meaning_html"]), list(form.definitions)):
         raise ValueError(f"Exact-definition bucket selected a non-exact-definition pair: {item!r}")
 
@@ -442,13 +443,13 @@ def consume_metadata_only_bucket(
     bucket: str,
     match_type: str,
     state_effect: str,
-    validate_item: Callable[[dict[str, Any], LexiconForm, dict[str, Any]], None],
+    validate_item: Callable[[dict[str, Any], LexiconForm, HskMatchingPair], None],
     include_form_stats: bool = True,
 ) -> dict[str, Any]:
     selected_items = pipeline["bucket_results"][bucket]["selected_items"]
     consumed_entries: list[dict[str, Any]] = []
 
-    for item in sorted(selected_items, key=pair_source_form_id):
+    for item in sorted(selected_items, key=item_source_form_id):
         word, form, _, _ = target_word_and_form_from_pair(state, item)
         entry = deck_entry_for_pair(deck_entries, item)
         validate_item(entry, form, item)
@@ -495,7 +496,7 @@ def consume_manual_pinyin_override_bucket(
     selected_items = pipeline["bucket_results"]["manual_pinyin_override"]["selected_items"]
     consumed_entries: list[dict[str, Any]] = []
 
-    for item in sorted(selected_items, key=pair_source_form_id):
+    for item in sorted(selected_items, key=item_source_form_id):
         word, form, _, form_key = target_word_and_form_from_pair(state, item)
         entry = deck_entry_with_manual_pinyin_override(deck_entries, item)
         old_pinyin = form.pinyin
@@ -552,7 +553,7 @@ def consume_manual_pinyin_override_bucket(
                 form_stats["pinyin_substantive"].append(override_record)
 
         new_form_key = rekey_form(word, form_key, form, new_pinyin)
-        item["target"] = {**item["target"], "form_key": new_form_key}
+        item.target_form_key = new_form_key
         consumed_entries.append(entry)
 
     return {
@@ -591,8 +592,8 @@ def consume_spoken_tone_variant_bucket(
     consumed_entries: list[dict[str, Any]] = []
     added_readings: list[dict[str, Any]] = []
 
-    for item in sorted(selected_items, key=pair_source_form_id):
-        spoken_tone_variant = item["context"].get("spoken_tone_variant")
+    for item in sorted(selected_items, key=item_source_form_id):
+        spoken_tone_variant = item.context.get("spoken_tone_variant")
         if not spoken_tone_variant or not spoken_tone_variant.get("kinds"):
             raise ValueError(f"Spoken-tone-variant bucket lacks recognized variant context: {item!r}")
 
@@ -603,7 +604,7 @@ def consume_spoken_tone_variant_bucket(
             raise ValueError(f"Spoken-tone-variant bucket selected a non-toneless pair: {item!r}")
         apply_entry_metadata_to_selected_form(word, form, entry)
 
-        source_pinyin = source_pinyin_in_dictionary_format(entry["pinyin"], item["dictionary"]["pinyin"])
+        source_pinyin = source_pinyin_in_dictionary_format(entry["pinyin"], item.dictionary_pinyin)
         old_readings = list(form.pinyin_readings)
         added = form.add_pinyin_readings(source_pinyin)
         form_stats["matched"] += 1
@@ -612,7 +613,7 @@ def consume_spoken_tone_variant_bucket(
         added_readings.append(
             {
                 "entry": entry_summary(entry),
-                "target": item["target"],
+                "target": item.target_report(),
                 "spoken_tone_variant_kinds": list(spoken_tone_variant["kinds"]),
                 "dictionary_primary_pinyin": form.pinyin,
                 "source_pinyin": source_pinyin,
@@ -672,8 +673,8 @@ def compact_lower_pinyin_key_from_record(record: dict[str, Any]) -> str:
     return str(record.get("compact_lower") or "")
 
 
-def matching_also_pr_reading_values(item: dict[str, Any], context_key: str) -> list[str]:
-    context = item["context"].get(context_key)
+def matching_also_pr_reading_values(item: HskMatchingPair, context_key: str) -> list[str]:
+    context = item.context.get(context_key)
     if not context:
         raise ValueError(f"{context_key} bucket item lacks also-pr context: {item!r}")
 
@@ -693,15 +694,19 @@ def matching_also_pr_reading_values(item: dict[str, Any], context_key: str) -> l
     return readings
 
 
-def add_also_pr_readings_to_form(item: dict[str, Any], form: LexiconForm, context_key: str) -> dict[str, Any]:
+def add_also_pr_readings_to_form(
+    item: HskMatchingPair,
+    form: LexiconForm,
+    context_key: str,
+) -> dict[str, Any]:
     old_readings = list(form.pinyin_readings)
     requested_readings = [
-        pinyin_reading_in_reference_spacing(reading, item["dictionary"]["pinyin"])
+        pinyin_reading_in_reference_spacing(reading, item.dictionary_pinyin)
         for reading in matching_also_pr_reading_values(item, context_key)
     ]
     added = form.add_pinyin_readings(" / ".join(requested_readings))
     return {
-        "target": item["target"],
+        "target": item.target_report(),
         "dictionary_primary_pinyin": form.pinyin,
         "requested_pinyin_readings": requested_readings,
         "old_pinyin_readings": old_readings,
@@ -710,7 +715,11 @@ def add_also_pr_readings_to_form(item: dict[str, Any], form: LexiconForm, contex
     }
 
 
-def validate_exact_definition_also_pr_item(entry: dict[str, Any], form: LexiconForm, item: dict[str, Any]) -> None:
+def validate_exact_definition_also_pr_item(
+    entry: dict[str, Any],
+    form: LexiconForm,
+    item: HskMatchingPair,
+) -> None:
     if not definition_sets_exact(definitions_from_meaning_html(entry["meaning_html"]), list(form.definitions)):
         raise ValueError(f"Exact-definition also-pr bucket selected a non-exact-definition pair: {item!r}")
 
@@ -718,9 +727,9 @@ def validate_exact_definition_also_pr_item(entry: dict[str, Any], form: LexiconF
 def validate_semicolon_split_exact_definition_also_pr_item(
     _entry: dict[str, Any],
     _form: LexiconForm,
-    item: dict[str, Any],
+    item: HskMatchingPair,
 ) -> None:
-    context = item["context"].get("semicolon_split_exact_definition_also_pr")
+    context = item.context.get("semicolon_split_exact_definition_also_pr")
     if not context:
         raise ValueError(f"Semicolon-split exact-definition also-pr bucket lacks context: {item!r}")
     if set(context["source_expanded_definitions"]) != set(context["dictionary_expanded_definitions"]):
@@ -737,13 +746,13 @@ def consume_also_pr_bucket(
     context_key: str,
     match_type: str,
     state_effect: str,
-    validate_item: Callable[[dict[str, Any], LexiconForm, dict[str, Any]], None],
+    validate_item: Callable[[dict[str, Any], LexiconForm, HskMatchingPair], None],
 ) -> dict[str, Any]:
     selected_items = pipeline["bucket_results"][bucket]["selected_items"]
     consumed_entries: list[dict[str, Any]] = []
     added_readings: list[dict[str, Any]] = []
 
-    for item in sorted(selected_items, key=pair_source_form_id):
+    for item in sorted(selected_items, key=item_source_form_id):
         word, form, _, _ = target_word_and_form_from_pair(state, item)
         entry = deck_entry_for_pair(deck_entries, item)
         validate_item(entry, form, item)
@@ -830,20 +839,20 @@ def consume_html_subform_definition_cover_bucket(
     form_stats: dict[str, Any],
 ) -> dict[str, Any]:
     selected_items = pipeline["bucket_results"]["html_subform_definition_cover"]["selected_items"]
-    items_by_source_form: dict[int, list[dict[str, Any]]] = {}
+    items_by_source_form: dict[int, list[HskMatchingPair]] = {}
     for item in selected_items:
-        items_by_source_form.setdefault(pair_source_form_id(item), []).append(item)
+        items_by_source_form.setdefault(item.source_form_id, []).append(item)
 
     consumed_entries: list[dict[str, Any]] = []
     matched_targets: list[dict[str, Any]] = []
 
     for source_form_id in sorted(items_by_source_form):
         source_items = items_by_source_form[source_form_id]
-        context = source_items[0]["context"].get("html_subform_definition_cover")
+        context = source_items[0].context.get("html_subform_definition_cover")
         if not context:
             raise ValueError(f"HTML-subform bucket lacks context: {source_items[0]!r}")
 
-        selected_targets = {target_identity(item["target"]) for item in source_items}
+        selected_targets = {target_identity(item.target_report()) for item in source_items}
         context_targets = {target_identity(match["target"]) for match in context.get("matches", [])}
         if selected_targets != context_targets:
             raise ValueError(f"HTML-subform bucket selected pairs do not match context coverage: {source_items!r}")
@@ -896,9 +905,9 @@ def assert_default_unresolved_bucket_empty(
     if selected_items:
         sample = [
             {
-                "source_form_id": pair_source_form_id(item),
-                "source": item.get("source"),
-                "target": item.get("target"),
+                "source_form_id": item.source_form_id,
+                "source": item.source_form.source_report(),
+                "target": item.target_report(),
             }
             for item in selected_items[:10]
         ]

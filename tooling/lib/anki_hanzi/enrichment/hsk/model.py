@@ -1,27 +1,144 @@
-"""Shared xiehanzi matching-pipeline data helpers.
-
-The pipeline still serializes report items as dictionaries, but pair identity
-and bucket counting belong to the pipeline model rather than to an individual
-matching or consumption rule module.
-"""
+"""Typed source forms and matching pairs for the xiehanzi pipeline."""
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from dataclasses import dataclass, field, replace
 from typing import Any, TypedDict
 
 
 PairId = tuple[int, int]
-PipelineItem = dict[str, Any]
+
+
+@dataclass
+class HskSourceForm:
+    source_form_id: int
+    entry: dict[str, Any]
+    candidate_count: int = 0
+    bucket: str | None = None
+    matching_rule: str | None = None
+
+    @property
+    def source_key(self) -> str:
+        return str(self.entry["simplified"])
+
+    def assigned_to(self, *, bucket: str, matching_rule: str) -> HskSourceForm:
+        return replace(self, bucket=bucket, matching_rule=matching_rule)
+
+    def source_report(self) -> dict[str, Any]:
+        report = {
+            "simplified": self.entry["simplified"],
+            "pinyin": self.entry["pinyin"],
+            "deck_level": self.entry["deck_level"],
+            "raw_level": self.entry["raw_level"],
+            "source": self.entry["source"],
+            "tags": list(self.entry["tags"]),
+        }
+        raw_pinyin = self.entry.get("raw_pinyin")
+        if raw_pinyin and raw_pinyin != self.entry["pinyin"]:
+            report["raw_pinyin"] = raw_pinyin
+        return report
+
+    def to_report(self) -> dict[str, Any]:
+        return {
+            "source": self.source_report(),
+            "context": {
+                "source_form_id": self.source_form_id,
+                "candidate_count_for_source": self.candidate_count,
+            },
+            "bucket": self.bucket,
+            "matching_rule": self.matching_rule,
+        }
+
+
+@dataclass
+class HskMatchingPair:
+    source_form: HskSourceForm
+    target_word_key: str
+    target_form_key: str
+    dictionary_simplified: str
+    dictionary_pinyin: str
+    dictionary_primary_pinyin: str
+    dictionary_pinyin_readings: tuple[str, ...]
+    dictionary_tags: tuple[str, ...]
+    dictionary_definitions: tuple[str, ...]
+    source_definitions: tuple[str, ...]
+    candidate_index: int
+    bucket: str
+    matching_rule: str
+    context: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def source_form_id(self) -> int:
+        return self.source_form.source_form_id
+
+    @property
+    def identity(self) -> PairId:
+        return self.source_form_id, self.candidate_index
+
+    def assigned_to(
+        self,
+        *,
+        bucket: str,
+        matching_rule: str,
+        context_name: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> HskMatchingPair:
+        updated_context = dict(self.context)
+        if context_name is not None and context is not None:
+            updated_context[context_name] = context
+        return replace(
+            self,
+            bucket=bucket,
+            matching_rule=matching_rule,
+            context=updated_context,
+        )
+
+    def target_report(self) -> dict[str, str]:
+        return {
+            "word_key": self.target_word_key,
+            "form_key": self.target_form_key,
+        }
+
+    def dictionary_report(self) -> dict[str, Any]:
+        return {
+            "simplified": self.dictionary_simplified,
+            "pinyin": self.dictionary_pinyin,
+            "primary_pinyin": self.dictionary_primary_pinyin,
+            "pinyin_readings": list(self.dictionary_pinyin_readings),
+            "tags": list(self.dictionary_tags),
+            "definitions": list(self.dictionary_definitions),
+        }
+
+    def to_report(self) -> dict[str, Any]:
+        return {
+            "source": self.source_form.source_report(),
+            "target": self.target_report(),
+            "dictionary": self.dictionary_report(),
+            "source_definitions": list(self.source_definitions),
+            "source_meaning_html": self.source_form.entry["meaning_html"],
+            "context": {
+                "source_form_id": self.source_form_id,
+                "candidate_count_for_source": self.source_form.candidate_count,
+                "candidate_index_for_source": self.candidate_index,
+                **self.context,
+            },
+            "bucket": self.bucket,
+            "matching_rule": self.matching_rule,
+        }
+
+
+BucketItem = HskSourceForm | HskMatchingPair
 
 
 class MatchingRuleResult(TypedDict):
-    selected_items: list[PipelineItem]
-    remaining_items: list[PipelineItem]
+    selected_items: list[HskMatchingPair]
+    remaining_items: list[HskMatchingPair]
     selected_source_form_ids: set[int]
 
 
 class SourcePreludeRuleResult(TypedDict):
-    selected_items: list[PipelineItem]
+    selected_items: list[HskSourceForm]
     selected_source_form_ids: set[int]
 
 
@@ -37,7 +154,7 @@ class PairConsumption(TypedDict):
     consumed_source_form_count: int
     consumed_matching_pair_count: int
     removed_from_remaining_matching_pair_count: int
-    remaining_items: list[PipelineItem]
+    remaining_items: list[HskMatchingPair]
 
 
 class BucketResult(TypedDict):
@@ -45,7 +162,7 @@ class BucketResult(TypedDict):
     bucket: str
     input_source_form_count: int
     input_matching_pair_count: int
-    selected_items: list[PipelineItem]
+    selected_items: list[BucketItem]
     selected_source_form_count: int
     selected_matching_pair_count: int
     consumed_source_form_count: int
@@ -53,7 +170,7 @@ class BucketResult(TypedDict):
     removed_from_remaining_matching_pair_count: int
     remaining_source_form_count_after_consumption: int
     remaining_matching_pair_count_after_consumption: int
-    items_after_consumption: list[PipelineItem]
+    items_after_consumption: list[BucketItem]
 
 
 class SourcePreludePipelineResult(TypedDict):
@@ -65,35 +182,29 @@ class SourcePreludePipelineResult(TypedDict):
 class PairPipelineResult(TypedDict):
     bucket_results: dict[str, BucketResult]
     consumed_by_source_form: dict[int, str]
-    remaining_items: list[PipelineItem]
+    remaining_items: list[HskMatchingPair]
 
 
-def pair_source_form_id(item: PipelineItem) -> int:
-    return int(item["context"]["source_form_id"])
+def item_source_form_id(item: BucketItem) -> int:
+    return item.source_form_id
 
 
-def pair_candidate_index(item: PipelineItem) -> int:
-    return int(item["context"]["candidate_index_for_source"])
+def matching_pair_identity(item: HskMatchingPair) -> PairId:
+    return item.identity
 
 
-def matching_pair_identity(item: PipelineItem) -> PairId | None:
-    if "dictionary" not in item:
-        return None
-    return (pair_source_form_id(item), pair_candidate_index(item))
+def bucket_source_form_ids(items: Iterable[BucketItem]) -> set[int]:
+    return {item_source_form_id(item) for item in items}
 
 
-def bucket_source_form_ids(items: list[PipelineItem]) -> set[int]:
-    return {pair_source_form_id(item) for item in items}
+def bucket_matching_pair_count(items: Iterable[BucketItem]) -> int:
+    return sum(isinstance(item, HskMatchingPair) for item in items)
 
 
-def bucket_matching_pair_count(items: list[PipelineItem]) -> int:
-    return sum(1 for item in items if "dictionary" in item)
-
-
-def group_pairs_by_source_form(working_pairs: list[PipelineItem]) -> dict[int, list[PipelineItem]]:
-    pairs_by_source_form: dict[int, list[PipelineItem]] = {}
+def group_pairs_by_source_form(working_pairs: list[HskMatchingPair]) -> dict[int, list[HskMatchingPair]]:
+    pairs_by_source_form: dict[int, list[HskMatchingPair]] = {}
     for pair in working_pairs:
-        pairs_by_source_form.setdefault(pair_source_form_id(pair), []).append(pair)
+        pairs_by_source_form.setdefault(pair.source_form_id, []).append(pair)
     return pairs_by_source_form
 
 
@@ -106,7 +217,7 @@ def empty_source_prelude_consumption(remaining_source_form_ids: set[int]) -> Sou
     }
 
 
-def empty_pair_consumption(remaining_items: list[PipelineItem]) -> PairConsumption:
+def empty_pair_consumption(remaining_items: list[HskMatchingPair]) -> PairConsumption:
     return {
         "consumed_source_form_ids": set(),
         "consumed_source_form_count": 0,
@@ -121,7 +232,7 @@ def source_prelude_bucket_result(
     bucket: str,
     phase: str,
     input_source_form_count: int,
-    selected_items: list[PipelineItem],
+    selected_items: list[HskSourceForm],
     consumption: SourcePreludeConsumption,
 ) -> BucketResult:
     return {
@@ -145,10 +256,10 @@ def pair_pipeline_bucket_result(
     *,
     bucket: str,
     phase: str,
-    input_items: list[PipelineItem],
-    selected_items: list[PipelineItem],
+    input_items: list[HskMatchingPair],
+    selected_items: list[HskMatchingPair],
     consumption: PairConsumption,
-    items_after_consumption: list[PipelineItem] | None = None,
+    items_after_consumption: list[HskMatchingPair] | None = None,
 ) -> BucketResult:
     remaining_items = consumption["remaining_items"]
     return {

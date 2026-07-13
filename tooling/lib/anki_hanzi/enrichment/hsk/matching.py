@@ -19,9 +19,10 @@ from anki_hanzi.enrichment.hsk.rule_helpers import (
     strip_html_text,
 )
 from anki_hanzi.enrichment.hsk.model import (
+    HskMatchingPair,
+    HskSourceForm,
     MatchingRuleResult,
     PairId,
-    PipelineItem,
     SourcePreludeRuleResult,
     bucket_source_form_ids,
     group_pairs_by_source_form,
@@ -30,14 +31,14 @@ from anki_hanzi.enrichment.hsk.model import (
 
 
 SourcePreludeMatchingHandler = Callable[
-    [dict[int, dict[str, Any]], dict[str, list["TargetFormRef"]], set[int], str, str],
+    [dict[int, HskSourceForm], dict[str, list["TargetFormRef"]], set[int], str, str],
     SourcePreludeRuleResult,
 ]
-PairMatchingHandler = Callable[[list[PipelineItem], str, str], MatchingRuleResult]
+PairMatchingHandler = Callable[[list[HskMatchingPair], str, str], MatchingRuleResult]
 MatchingRuleHandler = SourcePreludeMatchingHandler | PairMatchingHandler
 PairContext = dict[str, Any]
-PairContextPredicate = Callable[[PipelineItem], PairContext | None]
-PairPredicate = Callable[[PipelineItem], bool]
+PairContextPredicate = Callable[[HskMatchingPair], PairContext | None]
+PairPredicate = Callable[[HskMatchingPair], bool]
 
 ALSO_PR_RE = re.compile(r"also\s+pr\.\s*\[([^\]]+)\]", re.IGNORECASE)
 PINYIN_BLOCK_RE = re.compile(
@@ -75,7 +76,7 @@ class MatchingRuleDefinition:
 
     def match_source_prelude(
         self,
-        entry_reports_by_id: dict[int, dict[str, Any]],
+        source_forms_by_id: dict[int, HskSourceForm],
         target_form_index: dict[str, list["TargetFormRef"]],
         remaining_source_form_ids: set[int],
         bucket: str,
@@ -83,9 +84,9 @@ class MatchingRuleDefinition:
         if self.scope != "source_prelude":
             raise ValueError(f"matching rule {self.name!r} is not a source prelude rule")
         handler = cast(SourcePreludeMatchingHandler, self.handler)
-        return handler(entry_reports_by_id, target_form_index, remaining_source_form_ids, bucket, self.name)
+        return handler(source_forms_by_id, target_form_index, remaining_source_form_ids, bucket, self.name)
 
-    def match_pairs(self, working_pairs: list[PipelineItem], bucket: str) -> MatchingRuleResult:
+    def match_pairs(self, working_pairs: list[HskMatchingPair], bucket: str) -> MatchingRuleResult:
         if self.scope not in {"pair_pipeline", "terminal"}:
             raise ValueError(f"matching rule {self.name!r} is not a pair-pipeline rule")
         handler = cast(PairMatchingHandler, self.handler)
@@ -98,48 +99,6 @@ class TargetFormRef:
     form_key: str
     word: LexiconWord
     form: LexiconForm
-
-
-def source_entry_report(entry: dict[str, Any]) -> dict[str, Any]:
-    report = {
-        "simplified": entry["simplified"],
-        "pinyin": entry["pinyin"],
-        "deck_level": entry["deck_level"],
-        "raw_level": entry["raw_level"],
-        "source": entry["source"],
-        "tags": list(entry["tags"]),
-    }
-    if entry.get("raw_pinyin") and entry["raw_pinyin"] != entry["pinyin"]:
-        report["raw_pinyin"] = entry["raw_pinyin"]
-    return report
-
-
-def candidate_report(entry: dict[str, Any], target: TargetFormRef) -> dict[str, Any]:
-    word = target.word
-    form = target.form
-    dictionary_pinyin = form.pinyin_reading_string
-    source_definitions = definitions_from_meaning_html(entry["meaning_html"])
-    return {
-        "target": {
-            "word_key": target.word_key,
-            "form_key": target.form_key,
-        },
-        "dictionary": {
-            "simplified": word.simplified,
-            "pinyin": dictionary_pinyin,
-            "primary_pinyin": form.pinyin,
-            "pinyin_readings": list(form.pinyin_readings),
-            "tags": list(form.tags),
-            "definitions": list(form.definitions),
-        },
-        "source_definitions": source_definitions,
-    }
-
-
-def entry_candidate_summary(candidates: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        "candidate_count": len(candidates),
-    }
 
 
 def simplified_matching_key(value: str) -> str:
@@ -160,26 +119,9 @@ def build_target_form_index(state: LexiconState) -> dict[str, list[TargetFormRef
     return target_form_index
 
 
-def empty_entry_candidate_summary() -> dict[str, Any]:
+def build_source_forms(deck_entries: list[dict[str, Any]]) -> dict[int, HskSourceForm]:
     return {
-        "candidate_count": 0,
-    }
-
-
-def source_matching_entry_report(entry: dict[str, Any], source_form_id: int) -> dict[str, Any]:
-    return {
-        "source_form_id": source_form_id,
-        "source_key": simplified_matching_key(entry["simplified"]),
-        "entry": entry,
-        "source_entry": source_entry_report(entry),
-        "candidate_summary": empty_entry_candidate_summary(),
-        "candidates": [],
-    }
-
-
-def build_source_entry_reports(deck_entries: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
-    return {
-        source_form_id: source_matching_entry_report(entry, source_form_id)
+        source_form_id: HskSourceForm(source_form_id=source_form_id, entry=entry)
         for source_form_id, entry in enumerate(deck_entries)
     }
 
@@ -191,53 +133,52 @@ def candidate_count_bucket(count: int) -> str:
 
 
 def matching_pair_report(
-    entry_report: dict[str, Any],
-    candidate: dict[str, Any],
+    source_form: HskSourceForm,
+    target: TargetFormRef,
     *,
     bucket: str,
     candidate_index: int,
     matching_rule: str,
-) -> dict[str, Any]:
-    candidate_summary = entry_report["candidate_summary"]
-    return {
-        "source": entry_report["source_entry"],
-        "target": candidate["target"],
-        "dictionary": candidate["dictionary"],
-        "source_definitions": candidate["source_definitions"],
-        "source_meaning_html": entry_report["entry"]["meaning_html"],
-        "context": {
-            "source_form_id": entry_report["source_form_id"],
-            "candidate_count_for_source": candidate_summary["candidate_count"],
-            "candidate_index_for_source": candidate_index,
-        },
-        "bucket": bucket,
-        "matching_rule": matching_rule,
-    }
+) -> HskMatchingPair:
+    form = target.form
+    return HskMatchingPair(
+        source_form=source_form,
+        target_word_key=target.word_key,
+        target_form_key=target.form_key,
+        dictionary_simplified=target.word.simplified,
+        dictionary_pinyin=form.pinyin_reading_string,
+        dictionary_primary_pinyin=form.pinyin,
+        dictionary_pinyin_readings=tuple(form.pinyin_readings),
+        dictionary_tags=tuple(form.tags),
+        dictionary_definitions=tuple(form.definitions),
+        source_definitions=tuple(definitions_from_meaning_html(source_form.entry["meaning_html"])),
+        candidate_index=candidate_index,
+        bucket=bucket,
+        matching_rule=matching_rule,
+    )
 
 
-def missing_dictionary_word_report(entry_report: dict[str, Any], *, bucket: str, matching_rule: str) -> dict[str, Any]:
-    return {
-        "source": entry_report["source_entry"],
-        "context": {
-            "source_form_id": entry_report["source_form_id"],
-            "candidate_count_for_source": 0,
-        },
-        "bucket": bucket,
-        "matching_rule": matching_rule,
-    }
+def missing_dictionary_word_report(
+    source_form: HskSourceForm,
+    *,
+    bucket: str,
+    matching_rule: str,
+) -> HskSourceForm:
+    return source_form.assigned_to(bucket=bucket, matching_rule=matching_rule)
 
 
-def matching_pair_for_bucket(item: dict[str, Any], *, bucket: str, matching_rule: str) -> dict[str, Any]:
-    return {
-        **item,
-        "bucket": bucket,
-        "matching_rule": matching_rule,
-    }
+def matching_pair_for_bucket(
+    item: HskMatchingPair,
+    *,
+    bucket: str,
+    matching_rule: str,
+) -> HskMatchingPair:
+    return item.assigned_to(bucket=bucket, matching_rule=matching_rule)
 
 
 def matching_result(
-    selected_items: list[PipelineItem],
-    remaining_items: list[PipelineItem],
+    selected_items: list[HskMatchingPair],
+    remaining_items: list[HskMatchingPair],
 ) -> MatchingRuleResult:
     return {
         "selected_items": selected_items,
@@ -247,7 +188,7 @@ def matching_result(
 
 
 def split_pairs_by_selected_ids(
-    working_pairs: list[PipelineItem],
+    working_pairs: list[HskMatchingPair],
     selected_pair_ids: set[PairId],
     *,
     bucket: str,
@@ -255,19 +196,20 @@ def split_pairs_by_selected_ids(
     context_by_pair_id: dict[PairId, PairContext] | None = None,
     context_name: str | None = None,
 ) -> MatchingRuleResult:
-    selected_items: list[PipelineItem] = []
-    remaining_items: list[PipelineItem] = []
+    selected_items: list[HskMatchingPair] = []
+    remaining_items: list[HskMatchingPair] = []
 
     for pair in working_pairs:
         pair_id = matching_pair_identity(pair)
         if pair_id in selected_pair_ids:
-            selected_pair = matching_pair_for_bucket(pair, bucket=bucket, matching_rule=matching_rule)
-            if context_by_pair_id is not None and context_name is not None:
-                selected_pair["context"] = {
-                    **selected_pair["context"],
-                    context_name: context_by_pair_id[pair_id],
-                }
-            selected_items.append(selected_pair)
+            selected_items.append(
+                pair.assigned_to(
+                    bucket=bucket,
+                    matching_rule=matching_rule,
+                    context_name=context_name,
+                    context=context_by_pair_id[pair_id] if context_by_pair_id is not None else None,
+                )
+            )
         else:
             remaining_items.append(pair)
 
@@ -275,7 +217,7 @@ def split_pairs_by_selected_ids(
 
 
 def select_unique_pair_ids_by_source(
-    working_pairs: list[PipelineItem],
+    working_pairs: list[HskMatchingPair],
     predicate: PairPredicate,
 ) -> set[PairId]:
     selected_pair_ids: set[PairId] = set()
@@ -284,21 +226,19 @@ def select_unique_pair_ids_by_source(
         matching_pairs = [pair for pair in source_pairs if predicate(pair)]
         if len(matching_pairs) != 1:
             continue
-        pair_id = matching_pair_identity(matching_pairs[0])
-        if pair_id is not None:
-            selected_pair_ids.add(pair_id)
+        selected_pair_ids.add(matching_pair_identity(matching_pairs[0]))
 
     return selected_pair_ids
 
 
 def select_unique_pair_contexts_by_source(
-    working_pairs: list[PipelineItem],
+    working_pairs: list[HskMatchingPair],
     context_for_pair: PairContextPredicate,
 ) -> dict[PairId, PairContext]:
     context_by_pair_id: dict[PairId, PairContext] = {}
 
     for source_pairs in group_pairs_by_source_form(working_pairs).values():
-        matching_pairs: list[tuple[dict[str, Any], PairContext]] = []
+        matching_pairs: list[tuple[HskMatchingPair, PairContext]] = []
         for pair in source_pairs:
             context = context_for_pair(pair)
             if context is not None:
@@ -309,8 +249,7 @@ def select_unique_pair_contexts_by_source(
 
         pair, context = matching_pairs[0]
         pair_id = matching_pair_identity(pair)
-        if pair_id is not None:
-            context_by_pair_id[pair_id] = context
+        context_by_pair_id[pair_id] = context
 
     return context_by_pair_id
 
@@ -391,10 +330,10 @@ def also_pr_definition_readings(definitions: list[str]) -> list[dict[str, str]]:
     return readings
 
 
-def also_pr_pinyin_context(pair: dict[str, Any]) -> dict[str, Any] | None:
-    source_readings = unique_pinyin_reading_records(pair["source"]["pinyin"])
-    dictionary_readings = unique_pinyin_reading_records(pair["dictionary"]["pinyin"])
-    also_pr_readings = also_pr_definition_readings(list(pair["dictionary"].get("definitions", [])))
+def also_pr_pinyin_context(pair: HskMatchingPair) -> dict[str, Any] | None:
+    source_readings = unique_pinyin_reading_records(pair.source_form.entry["pinyin"])
+    dictionary_readings = unique_pinyin_reading_records(pair.dictionary_pinyin)
+    also_pr_readings = also_pr_definition_readings(list(pair.dictionary_definitions))
     source_keys = {reading["compact_lower"] for reading in source_readings}
     dictionary_keys = {reading["compact_lower"] for reading in dictionary_readings}
     also_pr_keys = {reading["compact_lower"] for reading in also_pr_readings}
@@ -417,7 +356,7 @@ def also_pr_pinyin_context(pair: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def exact_definition_also_pr_context(pair: dict[str, Any]) -> dict[str, Any] | None:
+def exact_definition_also_pr_context(pair: HskMatchingPair) -> dict[str, Any] | None:
     if not pair_definition_sets_exact(pair):
         return None
     return also_pr_pinyin_context(pair)
@@ -448,9 +387,9 @@ def semicolon_split_definition_sets_exact(left: list[str], right: list[str]) -> 
     return bool(left_set) and left_set == right_set
 
 
-def semicolon_split_exact_definition_also_pr_context(pair: dict[str, Any]) -> dict[str, Any] | None:
-    source_definitions = list(pair.get("source_definitions", []))
-    dictionary_definitions = list(pair["dictionary"].get("definitions", []))
+def semicolon_split_exact_definition_also_pr_context(pair: HskMatchingPair) -> dict[str, Any] | None:
+    source_definitions = list(pair.source_definitions)
+    dictionary_definitions = list(pair.dictionary_definitions)
     if not semicolon_split_definition_sets_exact(source_definitions, dictionary_definitions):
         return None
 
@@ -483,11 +422,11 @@ def source_html_subentries(meaning_html: str) -> list[dict[str, Any]]:
     return subentries
 
 
-def html_subform_match_context(source_pairs: list[dict[str, Any]]) -> dict[str, Any] | None:
+def html_subform_match_context(source_pairs: list[HskMatchingPair]) -> dict[str, Any] | None:
     if not source_pairs:
         return None
 
-    source_meaning_html = str(source_pairs[0].get("source_meaning_html") or "")
+    source_meaning_html = str(source_pairs[0].source_form.entry.get("meaning_html") or "")
     subentries = source_html_subentries(source_meaning_html)
     if not subentries:
         return None
@@ -495,13 +434,13 @@ def html_subform_match_context(source_pairs: list[dict[str, Any]]) -> dict[str, 
     matches: list[dict[str, Any]] = []
     matched_pair_ids: set[tuple[int, int]] = set()
     for subentry in subentries:
-        matching_pairs: list[dict[str, Any]] = []
+        matching_pairs: list[HskMatchingPair] = []
         for pair in source_pairs:
-            if classify_pinyin(subentry["pinyin"], pair["dictionary"]["pinyin"]) != "exact":
+            if classify_pinyin(subentry["pinyin"], pair.dictionary_pinyin) != "exact":
                 continue
             if not semicolon_split_definition_sets_exact(
                 list(subentry["definitions"]),
-                list(pair["dictionary"].get("definitions", [])),
+                list(pair.dictionary_definitions),
             ):
                 continue
             matching_pairs.append(pair)
@@ -511,20 +450,20 @@ def html_subform_match_context(source_pairs: list[dict[str, Any]]) -> dict[str, 
 
         pair = matching_pairs[0]
         pair_id = matching_pair_identity(pair)
-        if pair_id is None or pair_id in matched_pair_ids:
+        if pair_id in matched_pair_ids:
             return None
         matched_pair_ids.add(pair_id)
 
-        dictionary_definitions = list(pair["dictionary"].get("definitions", []))
-        row_pinyin_match = classify_pinyin(pair["source"]["pinyin"], pair["dictionary"]["pinyin"])
+        dictionary_definitions = list(pair.dictionary_definitions)
+        row_pinyin_match = classify_pinyin(pair.source_form.entry["pinyin"], pair.dictionary_pinyin)
         matches.append(
             {
                 "subentry_index": subentry["index"],
                 "subentry_pinyin": subentry["pinyin"],
                 "subentry_definitions": list(subentry["definitions"]),
                 "subentry_expanded_definitions": list(subentry["expanded_definitions"]),
-                "target": pair["target"],
-                "target_pinyin": pair["dictionary"]["pinyin"],
+                "target": pair.target_report(),
+                "target_pinyin": pair.dictionary_pinyin,
                 "target_definitions": dictionary_definitions,
                 "target_expanded_definitions": split_semicolon_definitions(dictionary_definitions),
                 "row_pinyin_match": row_pinyin_match,
@@ -532,13 +471,13 @@ def html_subform_match_context(source_pairs: list[dict[str, Any]]) -> dict[str, 
         )
 
     source_pair_ids = {matching_pair_identity(pair) for pair in source_pairs}
-    if matched_pair_ids != {pair_id for pair_id in source_pair_ids if pair_id is not None}:
+    if matched_pair_ids != source_pair_ids:
         return None
 
     return {
         "source_subentry_count": len(subentries),
         "matched_target_count": len(matches),
-        "row_pinyin": source_pairs[0]["source"]["pinyin"],
+        "row_pinyin": source_pairs[0].source_form.entry["pinyin"],
         "row_pinyin_matched_target_count": sum(
             1 for match in matches if match["row_pinyin_match"] in {"exact", "format_variant", "case_variant"}
         ),
@@ -546,28 +485,28 @@ def html_subform_match_context(source_pairs: list[dict[str, Any]]) -> dict[str, 
     }
 
 
-def pair_pinyin_kind(pair: dict[str, Any]) -> str:
-    return classify_pinyin(pair["source"]["pinyin"], pair["dictionary"]["pinyin"])
+def pair_pinyin_kind(pair: HskMatchingPair) -> str:
+    return classify_pinyin(pair.source_form.entry["pinyin"], pair.dictionary_pinyin)
 
 
-def pair_definition_sets_exact(pair: dict[str, Any]) -> bool:
+def pair_definition_sets_exact(pair: HskMatchingPair) -> bool:
     return definition_sets_exact(
-        list(pair.get("source_definitions", [])),
-        list(pair.get("dictionary", {}).get("definitions", [])),
+        list(pair.source_definitions),
+        list(pair.dictionary_definitions),
     )
 
 
 def match_missing_dictionary_word_sources(
-    entry_reports_by_id: dict[int, dict[str, Any]],
+    source_forms_by_id: dict[int, HskSourceForm],
     target_form_index: dict[str, list[TargetFormRef]],
     remaining_source_form_ids: set[int],
     bucket: str,
     matching_rule: str,
 ) -> SourcePreludeRuleResult:
     selected_items = [
-        missing_dictionary_word_report(entry_reports_by_id[source_form_id], bucket=bucket, matching_rule=matching_rule)
+        missing_dictionary_word_report(source_forms_by_id[source_form_id], bucket=bucket, matching_rule=matching_rule)
         for source_form_id in sorted(remaining_source_form_ids)
-        if entry_reports_by_id[source_form_id]["source_key"] not in target_form_index
+        if source_forms_by_id[source_form_id].source_key not in target_form_index
     ]
     return {
         "selected_items": selected_items,
@@ -576,25 +515,22 @@ def match_missing_dictionary_word_sources(
 
 
 def materialize_simplified_match_pairs(
-    entry_reports_by_id: dict[int, dict[str, Any]],
+    source_forms_by_id: dict[int, HskSourceForm],
     target_form_index: dict[str, list[TargetFormRef]],
     source_form_ids: set[int],
 ) -> dict[str, Any]:
-    working_pairs: list[PipelineItem] = []
+    working_pairs: list[HskMatchingPair] = []
 
     for source_form_id in sorted(source_form_ids):
-        entry_report = entry_reports_by_id[source_form_id]
-        entry = entry_report["entry"]
-        target_refs = target_form_index.get(entry_report["source_key"], [])
-        candidates = [candidate_report(entry, target) for target in target_refs]
-        entry_report["candidates"] = candidates
-        entry_report["candidate_summary"] = entry_candidate_summary(candidates)
+        source_form = source_forms_by_id[source_form_id]
+        target_refs = target_form_index.get(source_form.source_key, [])
+        source_form.candidate_count = len(target_refs)
 
-        for candidate_index, candidate in enumerate(candidates, start=1):
+        for candidate_index, target in enumerate(target_refs, start=1):
             working_pairs.append(
                 matching_pair_report(
-                    entry_report,
-                    candidate,
+                    source_form,
+                    target,
                     bucket="simplified_match_working_set",
                     candidate_index=candidate_index,
                     matching_rule="simplified_match",
@@ -614,28 +550,27 @@ def materialize_simplified_match_pairs(
 
 
 def match_manual_pinyin_override_pairs(
-    working_pairs: list[PipelineItem],
+    working_pairs: list[HskMatchingPair],
     bucket: str,
     matching_rule: str,
 ) -> MatchingRuleResult:
     overrides_by_pair_id: dict[PairId, dict[str, str]] = {}
 
     for source_pairs in group_pairs_by_source_form(working_pairs).values():
-        override = manual_pinyin_override_for_source(source_pairs[0]["source"])
+        override = manual_pinyin_override_for_source(source_pairs[0].source_form.entry)
         if override is None:
             continue
 
         corrected_matching_pairs = [
             pair
             for pair in source_pairs
-            if classify_pinyin(override["override_pinyin"], pair["dictionary"]["pinyin"]) in {"exact", "format_variant"}
+            if classify_pinyin(override["override_pinyin"], pair.dictionary_pinyin) in {"exact", "format_variant"}
         ]
         if len(corrected_matching_pairs) != 1:
             continue
 
         pair_id = matching_pair_identity(corrected_matching_pairs[0])
-        if pair_id is not None:
-            overrides_by_pair_id[pair_id] = override
+        overrides_by_pair_id[pair_id] = override
 
     return split_pairs_by_selected_ids(
         working_pairs,
@@ -648,7 +583,7 @@ def match_manual_pinyin_override_pairs(
 
 
 def match_strict_pinyin_exact_unique_pairs(
-    working_pairs: list[PipelineItem],
+    working_pairs: list[HskMatchingPair],
     bucket: str,
     matching_rule: str,
 ) -> MatchingRuleResult:
@@ -661,7 +596,7 @@ def match_strict_pinyin_exact_unique_pairs(
 
 
 def match_format_variant_unique_pairs(
-    working_pairs: list[PipelineItem],
+    working_pairs: list[HskMatchingPair],
     bucket: str,
     matching_rule: str,
 ) -> MatchingRuleResult:
@@ -674,14 +609,14 @@ def match_format_variant_unique_pairs(
 
 
 def match_spoken_tone_variant_pairs(
-    working_pairs: list[PipelineItem],
+    working_pairs: list[HskMatchingPair],
     bucket: str,
     matching_rule: str,
 ) -> MatchingRuleResult:
-    def context_for_pair(pair: PipelineItem) -> PairContext | None:
+    def context_for_pair(pair: HskMatchingPair) -> PairContext | None:
         if pair_pinyin_kind(pair) != "toneless":
             return None
-        kinds = spoken_tone_variant_kinds(pair["source"]["pinyin"], pair["dictionary"]["pinyin"])
+        kinds = spoken_tone_variant_kinds(pair.source_form.entry["pinyin"], pair.dictionary_pinyin)
         if not kinds:
             return None
         return {"kinds": list(kinds)}
@@ -698,7 +633,7 @@ def match_spoken_tone_variant_pairs(
 
 
 def match_case_variant_exact_definition_pairs(
-    working_pairs: list[PipelineItem],
+    working_pairs: list[HskMatchingPair],
     bucket: str,
     matching_rule: str,
 ) -> MatchingRuleResult:
@@ -715,7 +650,7 @@ def match_case_variant_exact_definition_pairs(
 
 
 def match_exact_definition_also_pr_pairs(
-    working_pairs: list[PipelineItem],
+    working_pairs: list[HskMatchingPair],
     bucket: str,
     matching_rule: str,
 ) -> MatchingRuleResult:
@@ -731,7 +666,7 @@ def match_exact_definition_also_pr_pairs(
 
 
 def match_exact_definition_pairs(
-    working_pairs: list[PipelineItem],
+    working_pairs: list[HskMatchingPair],
     bucket: str,
     matching_rule: str,
 ) -> MatchingRuleResult:
@@ -745,7 +680,7 @@ def match_exact_definition_pairs(
 
 
 def match_semicolon_split_exact_definition_also_pr_pairs(
-    working_pairs: list[PipelineItem],
+    working_pairs: list[HskMatchingPair],
     bucket: str,
     matching_rule: str,
 ) -> MatchingRuleResult:
@@ -764,7 +699,7 @@ def match_semicolon_split_exact_definition_also_pr_pairs(
 
 
 def match_html_subform_definition_cover_pairs(
-    working_pairs: list[PipelineItem],
+    working_pairs: list[HskMatchingPair],
     bucket: str,
     matching_rule: str,
 ) -> MatchingRuleResult:
@@ -776,8 +711,6 @@ def match_html_subform_definition_cover_pairs(
 
         for pair in source_pairs:
             pair_id = matching_pair_identity(pair)
-            if pair_id is None:
-                continue
             context_by_pair_id[pair_id] = context
 
     return split_pairs_by_selected_ids(
@@ -791,7 +724,7 @@ def match_html_subform_definition_cover_pairs(
 
 
 def match_unique_pinyin_kind_pairs(
-    working_pairs: list[PipelineItem],
+    working_pairs: list[HskMatchingPair],
     *,
     bucket: str,
     matching_rule: str,
@@ -810,7 +743,7 @@ def match_unique_pinyin_kind_pairs(
 
 
 def match_default_unresolved_pairs(
-    working_pairs: list[PipelineItem], bucket: str, matching_rule: str
+    working_pairs: list[HskMatchingPair], bucket: str, matching_rule: str
 ) -> MatchingRuleResult:
     selected_items = [
         matching_pair_for_bucket(pair, bucket=bucket, matching_rule=matching_rule) for pair in working_pairs
@@ -948,11 +881,11 @@ DEFAULT_UNRESOLVED_RULE = MatchingRuleDefinition(
 
 
 def candidate_count_buckets_for_source_forms(
-    entry_reports_by_id: dict[int, dict[str, Any]],
+    source_forms_by_id: dict[int, HskSourceForm],
     source_form_ids: set[int],
 ) -> Counter[str]:
     counts: Counter[str] = Counter()
     for source_form_id in source_form_ids:
-        candidate_count = entry_reports_by_id[source_form_id]["candidate_summary"]["candidate_count"]
+        candidate_count = source_forms_by_id[source_form_id].candidate_count
         counts[candidate_count_bucket(candidate_count)] += 1
     return counts

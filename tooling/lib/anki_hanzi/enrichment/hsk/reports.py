@@ -14,7 +14,11 @@ from anki_hanzi.enrichment.hsk.matching import (
     candidate_count_bucket,
     candidate_count_buckets_for_source_forms,
 )
-from anki_hanzi.enrichment.hsk.model import bucket_matching_pair_count, bucket_source_form_ids
+from anki_hanzi.enrichment.hsk.model import (
+    BucketItem,
+    bucket_matching_pair_count,
+    bucket_source_form_ids,
+)
 from anki_hanzi.enrichment.hsk.source import LEVELS, entry_summary
 
 
@@ -30,9 +34,10 @@ def selected_matching_pair_count_after_consumption(result: dict[str, Any], defin
     return 0
 
 
-def compact_report_item(item: dict[str, Any]) -> dict[str, Any]:
-    source = item["source"]
-    context = item.get("context", {})
+def compact_report_item(item: BucketItem) -> dict[str, Any]:
+    item_report = item.to_report()
+    source = item_report["source"]
+    context = item_report.get("context", {})
     source_label = f"{source['simplified']} {source['pinyin']} [{source['deck_level']}]"
     if source.get("raw_pinyin") and source["raw_pinyin"] != source["pinyin"]:
         source_label = f"{source_label} raw:{source['raw_pinyin']}"
@@ -41,11 +46,11 @@ def compact_report_item(item: dict[str, Any]) -> dict[str, Any]:
         "source": source_label,
     }
 
-    dictionary = item.get("dictionary")
+    dictionary = item_report.get("dictionary")
     if dictionary is not None:
         report["target"] = dictionary["pinyin"]
         report["definitions"] = {
-            "source": item.get("source_definitions", []),
+            "source": item_report.get("source_definitions", []),
             "dictionary": dictionary.get("definitions", []),
         }
 
@@ -171,7 +176,7 @@ def build_matching_report(
     bucket_item_limit: int | None = None,
 ) -> dict[str, Any]:
     dictionary_form_count = pipeline["dictionary_form_count"]
-    entry_reports_by_id = pipeline["entry_reports_by_id"]
+    source_forms_by_id = pipeline["source_forms_by_id"]
     materialization_result = pipeline["materialization_result"]
     working_pairs = pipeline["working_pairs"]
     bucket_results = pipeline["bucket_results"]
@@ -180,11 +185,10 @@ def build_matching_report(
     default_source_form_ids_after_consumption = bucket_source_form_ids(default_items)
 
     initial_candidate_count_buckets = Counter(
-        candidate_count_bucket(entry_report["candidate_summary"]["candidate_count"])
-        for entry_report in entry_reports_by_id.values()
+        candidate_count_bucket(source_form.candidate_count) for source_form in source_forms_by_id.values()
     )
     default_candidate_count_buckets = candidate_count_buckets_for_source_forms(
-        entry_reports_by_id,
+        source_forms_by_id,
         default_source_form_ids_after_consumption,
     )
 
