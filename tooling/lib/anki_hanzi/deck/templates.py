@@ -13,6 +13,7 @@ from anki_hanzi.deck.config import DeckConfig
 HANZI_WRITER_BUNDLE_MARKER = "/* __HANZI_WRITER_BUNDLE__ */"
 HANZI_WRITER_BUNDLE_PATTERN = re.compile(rf"(?m)^(?P<indent>[ \t]*){re.escape(HANZI_WRITER_BUNDLE_MARKER)}")
 HANZI_WRITER_DATA_BUNDLE_MARKER = "<!-- __HANZI_WRITER_DATA_BUNDLE__ -->"
+CARD_SETTINGS_MARKER = "__HANZI_CARD_SETTINGS__"
 
 
 def read_text(path: str | Path) -> str:
@@ -86,7 +87,12 @@ def inject_hanzi_data_bundle(template: str, bundle_path: Path) -> str:
 
 
 def inject_card_settings(template: str, card_type: str, config: DeckConfig) -> str:
-    return template.replace("__HANZI_CARD_SETTINGS__", config.card_settings_json(card_type))
+    return replace_unique_template_marker(
+        template,
+        CARD_SETTINGS_MARKER,
+        config.card_settings_json(card_type),
+        f"{card_type} card settings",
+    )
 
 
 def render_template_text(

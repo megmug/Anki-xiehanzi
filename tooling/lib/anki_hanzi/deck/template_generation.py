@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -163,6 +164,44 @@ STATIC_MEDIA_RESOURCE_PATHS = (
     "files/_hanzicraft.png",
     "files/_characterpop.svg",
 )
+
+INTERNAL_TEMPLATE_MARKER_PATTERN = re.compile(
+    r"__(?:HANZI|MORE_INFO|SHARED|WRITE)[A-Z0-9_]*__",
+)
+WRITE_REQUIRED_QFMT_SNIPPETS = (
+    ("embedded Hanzi Writer library", "/*! Hanzi Writer v"),
+    ("Hanzi Writer data loader", "function bundleCharDataLoader(char)"),
+    ("shared audio collector", "function collectAudioElements()"),
+    ("shared audio button setup", "function setupAudioButton()"),
+    ("shared visibility helper", "function showHide(selector, isShow, style)"),
+    ("shared sidebar helper", "function openSidebar(id)"),
+    ("Hanzi Writer instance creation", "HanziWriter.create("),
+    ("writer practice function", "function doPractice("),
+    ("writer practice startup", "doPractice();"),
+)
+
+
+def validate_composed_template(
+    card_type: str,
+    template: CardTemplateSpec,
+    *,
+    require_hanzi_writer_data: bool,
+) -> None:
+    unresolved_markers = sorted(
+        {marker for text in (template.qfmt, template.afmt) for marker in INTERNAL_TEMPLATE_MARKER_PATTERN.findall(text)}
+    )
+    if unresolved_markers:
+        raise ValueError(f"Composed {card_type} template contains unresolved markers: " + ", ".join(unresolved_markers))
+
+    if card_type != "Write":
+        return
+
+    required_snippets = list(WRITE_REQUIRED_QFMT_SNIPPETS)
+    if require_hanzi_writer_data:
+        required_snippets.append(("embedded Hanzi Writer character data", "window.hanziWriterData ="))
+    missing_parts = [label for label, snippet in required_snippets if snippet not in template.qfmt]
+    if missing_parts:
+        raise ValueError("Composed Write template is missing required runtime parts: " + ", ".join(missing_parts))
 
 
 def render_meaning_front_template(config: DeckConfig) -> str:
@@ -363,8 +402,7 @@ def render_write_front_template(resource_dir: Path) -> str:
 
 
 def render_basic_back_template(card_type: str, config: DeckConfig) -> str:
-    template = (
-        """<div id="char_pinyin">{{Pinyin}}</div>
+    template = """<div id="char_pinyin">{{Pinyin}}</div>
 <div id="char_sim" class="char-card">{{Simplified}}</div>
 <div id="audio" style="display: none">{{Audio}}</div>
 
@@ -409,9 +447,7 @@ def render_basic_back_template(card_type: str, config: DeckConfig) -> str:
   setupAudioButton();
   applyCardSettings();
 </script>
-"""
-        + render_more_info_sidebar()
-    )
+""" + render_more_info_sidebar()
     return inject_card_settings(
         render_shared_js_markers(common.TEMPLATE_RESOURCES_DIR, template),
         card_type,
@@ -484,11 +520,17 @@ class HanziTemplateGenerator:
         for card_type in config.card_types:
             renderer = self.card_renderer(card_type)
             model_name = f"{common.DECK_ROOT}::{card_type}"
+            template = renderer.render(config, hw_data_bundle)
+            validate_composed_template(
+                card_type,
+                template,
+                require_hanzi_writer_data=hw_data_bundle is not None,
+            )
             specs[card_type] = ModelSpec(
                 card_type=card_type,
                 name=model_name,
                 fields=self.fields,
-                templates=(renderer.render(config, hw_data_bundle),),
+                templates=(template,),
                 css=css,
             )
         return specs
