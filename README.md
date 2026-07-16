@@ -8,7 +8,7 @@ This fork keeps the parts needed for my own Mandarin study deck and has diverged
 
 Compared with upstream, this fork currently:
 
-- builds an APKG from the current CC-CEDICT snapshot; by default it selects all levels of the pinned HSK 3.0 / New HSK late-2025 word-list revision used for the current 2026 deck, plus the top 10,000 Mandarin frequency words;
+- builds an APKG from the current CC-CEDICT snapshot; by default it selects all levels of the pinned HSK 3.0 / New HSK late-2025 word-list revision used for the current 2026 deck, YCT levels 1-4, BCT levels A-B, and the top 10,000 Mandarin frequency words;
 - generates only the active Meaning, Pinyin, and Write card families, without sentence cards or a separate audio-only card type;
 - adds tags such as `hanzi::hsk::1` and `hanzi::freq::top2500`, and uses one subdeck per card type;
 - makes deck generation configurable so any set of tagged cards or individual words from the CC-CEDICT snapshot can be included, up to and including a full CC-CEDICT deck of roughly 360k cards, if so desired (not recommended);
@@ -62,8 +62,8 @@ The build result contains the hash-named APKG, a matching hash-named migrator ad
 
 ## Repository Layout
 
-- `deck_inputs/`: committed source inputs for the deck build, including card templates, deck config, the pinned CC-CEDICT snapshot, and the HSK/xiehanzi word-list submodule.
-- `tooling/`: Python build, utility, and shared helper code.
+- `deck_inputs/`: committed source inputs for the deck build, including the deck config, pinned CC-CEDICT snapshot, and HSK/xiehanzi word-list submodule.
+- `tooling/`: Python build, utility, shared helper, and card-template code.
 - `.github/workflows/`: CI build workflow that runs the Nix build, uploads artifacts, and generates releases.
 - `result/`: where the build artifacts land.
 

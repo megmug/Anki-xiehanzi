@@ -44,11 +44,14 @@ These modules are imported by build programs and are not direct entry points.
 - `lib/anki_hanzi/deck/entries.py`: enriched lexicon state to card-entry selection.
 - `lib/anki_hanzi/deck/identity.py`: stable deck, note, model, and tag identity helpers.
 - `lib/anki_hanzi/deck/reports.py`: build report assembly.
-- `lib/anki_hanzi/deck/templates.py`: card template loading and marker injection.
-- `lib/anki_hanzi/enrichment/`: hanzi HSK, xiehanzi, and frequency enrichment stages.
-  Xiehanzi enrichment is resolved through explicit matching buckets and consumption rules; the build aborts if the
-  terminal unresolved bucket is not empty.
+- `lib/anki_hanzi/deck/template_generation.py`: Meaning, Pinyin, and Write template composition and validation.
+- `lib/anki_hanzi/deck/templates.py`: template resource loading and marker injection.
+- `lib/anki_hanzi/deck/workspace.py`: isolated workspace for generated media and intermediate build artifacts.
+- `lib/anki_hanzi/enrichment/`: HSK/xiehanzi, frequency, YCT, BCT, and erhua enrichment stages.
+  HSK and BCT matching use explicit ordered buckets and consumption rules; their terminal unresolved buckets must be
+  empty for the build to succeed.
 - `lib/anki_hanzi/json_io.py`: stable JSON formatting and file output helpers.
 - `lib/anki_hanzi/lexicon/`: internal lexicon state and CC-CEDICT source parser.
+- `lib/anki_hanzi/paths.py`: shared paths to committed project inputs.
 - `lib/anki_hanzi/rendering/meaning_html.py`: render hanzi-style Meaning HTML from structured word and form data.
 - `lib/anki_hanzi/audio/`: provider-neutral audio generation plus Kokoro and edge-tts backends.

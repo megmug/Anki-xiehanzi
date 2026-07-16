@@ -1,3 +1,3 @@
 # TODO
 
-- Refactor the Anki migrator add-on so collection/APKG IO, matching, apply/rollback, verification, and report rendering are separated into focused modules.
+- Reassess private decomposition inside `CurrentDefaultMigration` only after a genuinely different migration handler exposes stable shared seams. Keep the small `MigrationStepHandler` interface unchanged.

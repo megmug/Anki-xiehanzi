@@ -5,13 +5,13 @@ This directory contains source inputs that are read to build this fork's APKG.
 ## Contents
 
 - `hsk-3.0-words-list/`: upstream HSK/xiehanzi word-list submodule.
-  The active build reads the prepared New HSK (2025) hanzi TSV files and frequency list.
+  The active build reads its prepared New HSK (2025), YCT, and BCT lists plus its Mandarin frequency list.
 - `cc-cedict/`: pinned CC-CEDICT snapshot used to build the internal lexicon state.
 - `deck_config.json`: deck selection config.
-  It selects which enriched hanzi study targets become generated notes, such as all HSK levels plus specific Simplified words.
+  It selects which enriched hanzi study targets become generated notes, such as HSK, YCT, BCT, and frequency-tagged words plus specific Simplified words.
   It can also include an optional `card_settings` object to bake card display settings into the generated templates per card type and side.
-- `card_templates/`: active Anki card HTML/CSS templates and static media packaged into the APKG.
-  The active template subdirectories are `meaning/`, `pinyin/`, and `write/`.
+
+Card-template code and resources live under `tooling/lib/anki_hanzi/deck/` because they are part of the generator rather than source data.
 
 ## `deck_config.json`
 
@@ -60,6 +60,8 @@ Common selection tags:
 
 - `hsk:1` through `hsk:6`
 - `hsk:7-9`
+- `yct:1` through `yct:4`
+- `bct:a` and `bct:b`
 - `freq:top500`
 - `freq:top2500`
 - `freq:top10000`

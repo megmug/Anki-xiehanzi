@@ -12,19 +12,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 
 from anki_hanzi.deck import common
 from anki_hanzi.deck.build import (
-    DEFAULT_BCT_DATA_DIR,
-    DEFAULT_DECK_CONFIG,
-    DEFAULT_FREQUENCY_LIST,
     DEFAULT_GENERATED_ZIP_DATETIME,
     DEFAULT_GENANKI_TIMESTAMP,
-    DEFAULT_HSK_DATA_DIR,
     DEFAULT_MIGRATOR_ADDON_OUTPUT,
     DEFAULT_REPORT_PATH,
-    DEFAULT_SNAPSHOT_MANIFEST,
-    DEFAULT_YCT_DATA_DIR,
     build_package,
 )
 from anki_hanzi.json_io import json_text
+from anki_hanzi.paths import (
+    DEFAULT_BCT_DATA_DIR,
+    DEFAULT_DECK_CONFIG,
+    DEFAULT_FREQUENCY_LIST,
+    DEFAULT_HSK_DATA_DIR,
+    DEFAULT_SNAPSHOT_MANIFEST,
+    DEFAULT_YCT_DATA_DIR,
+)
 
 
 def parse_zip_datetime(value: str) -> tuple[int, int, int, int, int, int]:

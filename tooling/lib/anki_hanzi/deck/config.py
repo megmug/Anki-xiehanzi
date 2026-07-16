@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from anki_hanzi.deck import common
+from anki_hanzi.paths import DEFAULT_DECK_CONFIG
 
 
 SUPPORTED_SELECTION_MODES = {"all", "tagged"}
@@ -114,7 +115,7 @@ class DeckConfig:
 
 def load_deck_config(path: Path | None = None) -> DeckConfig:
     if path is None:
-        path = common.DEFAULT_CONFIG_PATH
+        path = DEFAULT_DECK_CONFIG
     if not path.exists():
         return DeckConfig(selection=DeckSelection(config_path=str(path), config_found=False))
 

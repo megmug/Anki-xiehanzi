@@ -13,8 +13,6 @@ from anki_hanzi.lexicon.state import LexiconForm
 from anki_hanzi.pinyin import strict_numbered_preserve_case
 
 
-DEFAULT_DECK_INPUTS_DIR = Path("deck_inputs")
-DEFAULT_YCT_DATA_DIR = DEFAULT_DECK_INPUTS_DIR / "hsk-3.0-words-list/YCT"
 YCT_LEVELS = ("1", "2", "3", "4")
 PINYIN_TOKEN_SEPARATOR_RE = re.compile(r"(^|[\s'’·-])(?P<token>r5|er)(?=$|[\s'’·-])")
 MANUAL_YCT_FORM_MATCHES: dict[tuple[str, str], tuple[str, ...]] = {

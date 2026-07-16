@@ -8,8 +8,6 @@ from pathlib import Path
 from anki_hanzi.enrichment.bct.model import BctSourceEntry, BctSourceTerm
 
 
-DEFAULT_DECK_INPUTS_DIR = Path("deck_inputs")
-DEFAULT_BCT_DATA_DIR = DEFAULT_DECK_INPUTS_DIR / "hsk-3.0-words-list/BCT"
 BCT_LEVEL_FILES = {
     "a": "BCTA_cihui.txt",
     "b": "BCTB_cihui.txt",

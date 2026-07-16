@@ -28,25 +28,15 @@ from anki_hanzi.deck.reports import DeckBuildReportInput, build_deck_report
 from anki_hanzi.deck.template_generation import HanziTemplateGenerator
 from anki_hanzi.deck.workspace import temporary_build_workspace
 from anki_hanzi.enrichment import (
-    DEFAULT_BCT_DATA_DIR as ENRICHMENT_DEFAULT_BCT_DATA_DIR,
-    DEFAULT_FREQUENCY_LIST as ENRICHMENT_DEFAULT_FREQUENCY_LIST,
-    DEFAULT_HSK_DATA_DIR as ENRICHMENT_DEFAULT_HSK_DATA_DIR,
-    DEFAULT_YCT_DATA_DIR as ENRICHMENT_DEFAULT_YCT_DATA_DIR,
     HANZI_DEDUPE_KEY,
     enrich_state,
 )
 from anki_hanzi.json_io import write_json
 from anki_hanzi.lexicon import ENRICHED_LEXICON_SCHEMA, LexiconState
 from anki_hanzi.lexicon.cc_cedict import load_cedict_state, load_snapshot_manifest, resolve_source_file
+from anki_hanzi.paths import DEFAULT_AUDIO_EXCEPTIONS
 
 
-DEFAULT_FREQUENCY_LIST = ENRICHMENT_DEFAULT_FREQUENCY_LIST
-DEFAULT_HSK_DATA_DIR = ENRICHMENT_DEFAULT_HSK_DATA_DIR
-DEFAULT_YCT_DATA_DIR = ENRICHMENT_DEFAULT_YCT_DATA_DIR
-DEFAULT_BCT_DATA_DIR = ENRICHMENT_DEFAULT_BCT_DATA_DIR
-DEFAULT_SNAPSHOT_MANIFEST = Path("deck_inputs/cc-cedict/snapshot.json")
-DEFAULT_DECK_CONFIG = Path("deck_inputs/deck_config.json")
-DEFAULT_AUDIO_EXCEPTIONS = Path("deck_inputs/audio_generation_exceptions.json")
 DEFAULT_REPORT_PATH = Path("build_reports/build_report.json")
 DEFAULT_MIGRATOR_ADDON_SOURCE = Path("tooling/utilities/anki_hanzi_migrator")
 DEFAULT_MIGRATOR_ADDON_OUTPUT = Path("anki-hanzi-migrator.ankiaddon")

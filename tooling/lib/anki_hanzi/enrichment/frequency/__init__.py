@@ -11,10 +11,6 @@ from anki_hanzi.enrichment.model import EnrichmentStageResult
 from anki_hanzi.lexicon import LexiconState
 
 
-DEFAULT_DECK_INPUTS_DIR = Path("deck_inputs")
-DEFAULT_FREQUENCY_LIST = (
-    DEFAULT_DECK_INPUTS_DIR / "hsk-3.0-words-list/Scripts and data/blog_lit_news_tech_weibo_freq.release_sorted.txt"
-)
 TOP_FREQUENCY_THRESHOLDS = (500, 2500, 10000)
 
 

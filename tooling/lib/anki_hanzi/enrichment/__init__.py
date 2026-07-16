@@ -2,24 +2,20 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from anki_hanzi.enrichment.bct import (
     BCT_LEVELS,
-    DEFAULT_BCT_DATA_DIR,
     apply_bct_enrichment_to_state,
 )
 from anki_hanzi.enrichment.erhua import apply_erhua_definition_enrichment_to_state
 from anki_hanzi.enrichment.frequency import (
-    DEFAULT_FREQUENCY_LIST,
     TOP_FREQUENCY_THRESHOLDS,
     apply_frequency_enrichment_to_state,
 )
 from anki_hanzi.enrichment.hsk import (
-    DEFAULT_HSK_DATA_DIR,
     HANZI_DEDUPE_KEY,
     apply_hsk_enrichment_to_state,
 )
@@ -29,7 +25,6 @@ from anki_hanzi.enrichment.model import (
     stage_reports_by_name,
 )
 from anki_hanzi.enrichment.yct import (
-    DEFAULT_YCT_DATA_DIR,
     YCT_LEVELS,
     apply_yct_enrichment_to_state,
 )
@@ -129,36 +124,8 @@ def enrich_state(
     )
 
 
-def load_master_state(master_db_path: Path) -> LexiconState:
-    return LexiconState.from_master_json(json.loads(master_db_path.read_text(encoding="utf-8")))
-
-
-def enrich_database(
-    master_db_path: Path,
-    output_path: Path,
-    hsk_data_dir: Path = DEFAULT_HSK_DATA_DIR,
-    frequency_list_path: Path = DEFAULT_FREQUENCY_LIST,
-    yct_data_dir: Path = DEFAULT_YCT_DATA_DIR,
-    bct_data_dir: Path = DEFAULT_BCT_DATA_DIR,
-) -> LexiconEnrichmentResult:
-    return enrich_state(
-        master_state=load_master_state(master_db_path),
-        input_label=str(master_db_path),
-        output_path=output_path,
-        hsk_data_dir=hsk_data_dir,
-        frequency_list_path=frequency_list_path,
-        yct_data_dir=yct_data_dir,
-        bct_data_dir=bct_data_dir,
-    )
-
-
 __all__ = [
-    "DEFAULT_BCT_DATA_DIR",
-    "DEFAULT_FREQUENCY_LIST",
-    "DEFAULT_HSK_DATA_DIR",
-    "DEFAULT_YCT_DATA_DIR",
     "HANZI_DEDUPE_KEY",
     "LexiconEnrichmentResult",
-    "enrich_database",
     "enrich_state",
 ]

@@ -12,16 +12,12 @@ from anki_hanzi.deck import identity
 
 DECK_ROOT = "汉字 (Hànzì)"
 OUTPUT_APKG = Path("anki-hanzi.apkg")
-DECK_INPUTS_DIR = Path("deck_inputs")
 TEMPLATE_RESOURCES_DIR = Path("tooling/lib/anki_hanzi/deck/template_resources")
 HANZI_WRITER_PACKAGE_JSON = Path("node_modules/hanzi-writer/package.json")
 HANZI_WRITER_BUNDLE = Path("node_modules/hanzi-writer/dist/hanzi-writer.min.js")
 HANZI_WRITER_DATA_DIR = Path("node_modules/hanzi-writer-data")
 
-LEVELS = ["1", "2", "3", "4", "5", "6", "7-9"]
 CARD_TYPES = ["Meaning", "Pinyin", "Write"]
-
-DEFAULT_CONFIG_PATH = DECK_INPUTS_DIR / "deck_config.json"
 
 
 class NoteEntry(Protocol):
